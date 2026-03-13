@@ -6,9 +6,9 @@ use core::arch::asm;
 use limine::BaseRevision;
 use limine::request::{FramebufferRequest, RequestsEndMarker, RequestsStartMarker};
 
-mod graphics;
-use crate::graphics::*;
+pub mod utils;
 
+use crate::utils::graphics::{Framebuffer, circle_filled, circle_outline, rectangle_filled, rectangle_outline, rgb, triangle_outline};
 
 /// Sets the base revision to the latest revision supported by the crate.
 /// See specification for further info.
@@ -35,22 +35,28 @@ unsafe extern "C" fn kmain() -> ! {
     // All limine requests must also be referenced in a called function, otherwise they may be
     // removed by the linker.
     assert!(BASE_REVISION.is_supported());
-
+    
     if let Some(framebuffer_response) = FRAMEBUFFER_REQUEST.get_response() {
-        if let Some(framebuffer) = framebuffer_response.framebuffers().next() {
-            graphics::create_rect(&framebuffer, 0, 0, framebuffer.width(), framebuffer.height(), graphics::rgb(253, 129, 0));
+        if let Some(limine_framebuffer) = framebuffer_response.framebuffers().next() {
+            let mut fb = Framebuffer::new(&limine_framebuffer);
+            rectangle_filled(&mut fb, 0, 0, limine_framebuffer.width() as usize, limine_framebuffer.height() as usize, rgb(253, 129, 0));
+            rectangle_filled(&mut fb, 700, 400, 200, 200, rgb(0, 0, 0));
+            rectangle_outline(&mut fb, 400, 400, 100, 100, rgb(0, 0, 0));
+            circle_filled(&mut fb, 200, 200, 100.0, rgb(0, 0, 0));
+            circle_outline(&mut fb, 400, 200, 100.0, rgb(0, 0, 0));
+            triangle_outline(&mut fb, 100, 400, 200, 400, 150, 600, rgb(0, 0, 0));
         }
     }
 
-    hcf();
+    idle();
 }
 
 #[panic_handler]
 fn rust_panic(_info: &core::panic::PanicInfo) -> ! {
-    hcf();
+    idle();
 }
 
-fn hcf() -> ! {
+fn idle() -> ! {
     loop {
         unsafe {
             #[cfg(target_arch = "x86_64")]

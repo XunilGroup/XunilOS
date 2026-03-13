@@ -213,6 +213,7 @@ ifeq ($(KARCH),loongarch64)
 		iso_root -o $(IMAGE_NAME).iso
 endif
 	rm -rf iso_root
+	qemu-system-$(KARCH) -cdrom $(IMAGE_NAME).iso -m 512M -serial stdio
 
 $(IMAGE_NAME).hdd: limine/limine kernel
 	rm -f $(IMAGE_NAME).hdd
