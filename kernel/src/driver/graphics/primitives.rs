@@ -1,11 +1,6 @@
 use micromath::F32Ext;
-use crate::driver::framebuffer::Framebuffer;
-
-const PI: f32 = 3.1415926535897;
-
-pub fn rgb(r: u8, g: u8, b: u8) -> u32 {
-    ((r as u32) << 16) | ((g as u32) << 8) | (b as u32)
-}
+use crate::driver::graphics::framebuffer::Framebuffer;
+use crate::driver::graphics::base::{rgb, PI};
 
 pub fn line(framebuffer: &mut Framebuffer, mut x0: i64, mut y0: i64, x1: i64, y1: i64, color: u32) {    
     let mut dx = x1 - x0;
@@ -106,13 +101,15 @@ pub fn circle_filled(framebuffer: &mut Framebuffer, x0: usize, y0: usize, radius
     framebuffer.swap();
 }
 
-pub fn rectangle_filled(framebuffer: &mut Framebuffer, x: usize, y: usize, width: usize, height: usize, color: u32) {
+pub fn rectangle_filled(framebuffer: &mut Framebuffer, x: usize, y: usize, width: usize, height: usize, color: u32, swap: bool) {
     for fb_x in x..x+width {
         for fb_y in y..y+height {
             framebuffer.put_pixel(fb_x, fb_y, color);
         }
     }
-    framebuffer.swap();
+    if swap {
+        framebuffer.swap();
+    }
 }
 
 pub fn rectangle_outline(framebuffer: &mut Framebuffer, x: i64, y: i64, width: i64, height: i64, color: u32) {

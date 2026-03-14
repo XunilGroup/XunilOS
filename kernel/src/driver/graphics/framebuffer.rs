@@ -1,4 +1,5 @@
 use limine::framebuffer::Framebuffer as LimineFramebuffer;
+use spin::Mutex;
 
 const MAX_BACKBUFFER_PIXELS: usize = 1920 * 1080;
 static mut BACK_BUFFER: [u32; MAX_BACKBUFFER_PIXELS] = [0; MAX_BACKBUFFER_PIXELS];
@@ -6,8 +7,8 @@ static mut BACK_BUFFER: [u32; MAX_BACKBUFFER_PIXELS] = [0; MAX_BACKBUFFER_PIXELS
 pub struct Framebuffer {
     addr: *mut u32,
     back_buffer: *mut u32,
-    width: usize,
-    height: usize,
+    pub width: usize,
+    pub height: usize,
     pitch: usize,
     back_buffer_len: usize,
 }
@@ -49,5 +50,20 @@ impl Framebuffer {
         unsafe {
             core::ptr::copy_nonoverlapping(self.back_buffer, self.addr, self.back_buffer_len);
         }
+    }
+}
+
+unsafe impl Send for Framebuffer {}
+
+pub static FRAMEBUFFER: Mutex<Option<Framebuffer>> = Mutex::new(None);
+
+pub fn init_framebuffer(raw: &LimineFramebuffer) {
+    *FRAMEBUFFER.lock() = Some(Framebuffer::new(raw));
+}
+
+pub fn with_framebuffer<F: FnOnce(&mut Framebuffer)>(f: F) {
+    let mut guard = FRAMEBUFFER.lock();
+    if let Some(fb) = guard.as_mut() {
+        f(fb);
     }
 }
