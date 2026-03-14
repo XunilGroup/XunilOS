@@ -2,6 +2,7 @@
 #![no_main]
 
 use core::arch::asm;
+use core::fmt::Write;
 
 use limine::BaseRevision;
 use limine::request::{FramebufferRequest, RequestsEndMarker, RequestsStartMarker};
@@ -10,7 +11,7 @@ pub mod driver;
 pub mod arch;
 
 use spin::Mutex;
-use crate::arch::serial::{SerialConsole, init_serial_console, with_serial_console};
+use crate::arch::serial::{ConsoleWriter, SerialConsole, init_serial_console, with_serial_console};
 use crate::driver::graphics::font_render::render_text;
 use crate::driver::graphics::primitives::{circle_filled, circle_outline, rectangle_filled, rectangle_outline, triangle_outline};
 use crate::driver::graphics::base::rgb;
@@ -36,26 +37,32 @@ static _START_MARKER: RequestsStartMarker = RequestsStartMarker::new();
 #[unsafe(link_section = ".requests_end_marker")]
 static _END_MARKER: RequestsEndMarker = RequestsEndMarker::new();
 
-// #[macro_export]
-// macro_rules! print {
-//     ($($arg:tt)*) => (with_framebuffer(|mut fb|{
-//         with_serial_console(|serial_console| {
-//             serial_console.render_text(&mut fb, format_args!($($arg)*));
-//         });
-//     }));
-// }
+#[macro_export]
+macro_rules! print {
+    ($($arg:tt)*) => {
+        $crate::_print(core::format_args!($($arg)*))
+    };
+}
 
-// #[macro_export]
-// macro_rules! println {
-//     () => ($crate::print!("\n"));
-//     ($($arg:tt)*) => ($crate::print!("{}\n", format_args!($($arg)*)));
-// }
+#[macro_export]
+macro_rules! println {
+    () => {
+        $crate::_print(core::format_args!("\n"))
+    };
+    ($($arg:tt)*) => {
+        $crate::_print(core::format_args!("{}\n", core::format_args!($($arg)*)))
+    };
+}
 
-// #[doc(hidden)]
-// pub fn _print(args: fmt::Arguments) {
-//     use core::fmt::Write;
-//     WRITER.lock().write_fmt(args).unwrap();
-// }
+#[doc(hidden)]
+pub fn _print(args: core::fmt::Arguments) {
+    with_framebuffer(|fb| {
+        with_serial_console(|console| {
+            let mut writer = ConsoleWriter { fb, console };
+            let _ = writer.write_fmt(args);
+        });
+    });
+}
 
 #[unsafe(no_mangle)]
 unsafe extern "C" fn kmain() -> ! {
@@ -95,6 +102,9 @@ fn rust_panic(_info: &core::panic::PanicInfo) -> ! {
                 serial_console.render_text(&mut fb, "Message:");
                 serial_console.render_text(&mut fb, message);
             }
+            crate::println!("Kernel Panic! :C");
+            crate::print!("Message: ");
+            crate::println!("{}", _info);
         });
     });
 
