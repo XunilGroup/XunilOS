@@ -6,9 +6,10 @@ use core::arch::asm;
 use limine::BaseRevision;
 use limine::request::{FramebufferRequest, RequestsEndMarker, RequestsStartMarker};
 
-pub mod utils;
+pub mod driver;
 
-use crate::utils::graphics::{Framebuffer, circle_filled, circle_outline, rectangle_filled, rectangle_outline, rgb, triangle_outline};
+use crate::driver::graphics::{circle_filled, circle_outline, rectangle_filled, rectangle_outline, rgb, triangle_outline};
+use crate::driver::framebuffer::Framebuffer;
 
 /// Sets the base revision to the latest revision supported by the crate.
 /// See specification for further info.

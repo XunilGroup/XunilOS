@@ -1,5 +1,5 @@
-# NeumannOS
-NeumannOS is an OS written from scratch, named after the famous mathematician, physicist, computer scientist and engineer Neumann János Lajos.
+# XunilOS
+XunilOS is an OS made from scratch in Rust.
 
 The repo is based on the limine-rust-template.
 

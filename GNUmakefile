@@ -11,7 +11,7 @@ $(call USER_VARIABLE,KARCH,x86_64)
 # Default user QEMU flags. These are appended to the QEMU command calls.
 $(call USER_VARIABLE,QEMUFLAGS,-m 2G)
 
-override IMAGE_NAME := NeumannOS-$(KARCH)
+override IMAGE_NAME := XunilOS-$(KARCH)
 
 .PHONY: all
 all: $(IMAGE_NAME).iso
