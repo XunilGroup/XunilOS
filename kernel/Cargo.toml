@@ -1,13 +1,20 @@
 [package]
-name = "limine-rust-template"
+name = "XunilOS"
 version = "0.1.0"
 edition = "2024"
 
+[[bin]]
+name = "XunilOS"
+test = false
+bench = false
+
 [dependencies]
-font8x8 = { version="0.3.1", default-features = false }
+font8x8 = { version = "0.3.1", default-features = false }
+lazy_static = { version = "1.5.0", features = ["spin_no_std"] }
 limine = "0.5"
 micromath = "2.1.0"
 spin = "0.10.0"
+x86_64 = "0.15.4"
 
 [profile.dev]
 panic = "abort"

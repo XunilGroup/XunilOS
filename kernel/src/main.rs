@@ -1,5 +1,6 @@
 #![no_std]
 #![no_main]
+#![feature(abi_x86_interrupt)]
 
 use core::arch::asm;
 use core::fmt::Write;
@@ -7,15 +8,19 @@ use core::fmt::Write;
 use limine::BaseRevision;
 use limine::request::{FramebufferRequest, RequestsEndMarker, RequestsStartMarker};
 
-pub mod driver;
 pub mod arch;
+pub mod driver;
 
-use spin::Mutex;
-use crate::arch::serial::{ConsoleWriter, SerialConsole, init_serial_console, with_serial_console};
-use crate::driver::graphics::font_render::render_text;
-use crate::driver::graphics::primitives::{circle_filled, circle_outline, rectangle_filled, rectangle_outline, triangle_outline};
+use crate::arch::serial::{ConsoleWriter, init_serial_console, with_serial_console};
+#[cfg(target_arch = "x86_64")]
+use crate::arch::x86_64::gdt::load_gdt_x86_64;
 use crate::driver::graphics::base::rgb;
-use crate::driver::graphics::framebuffer::{Framebuffer, init_framebuffer, with_framebuffer};
+use crate::driver::graphics::framebuffer::{init_framebuffer, with_framebuffer};
+use crate::driver::graphics::primitives::{
+    circle_filled, circle_outline, rectangle_filled, rectangle_outline, triangle_outline,
+};
+
+use crate::arch::x86_64::idt::init_idt_x86_64;
 
 /// Sets the base revision to the latest revision supported by the crate.
 /// See specification for further info.
@@ -58,9 +63,14 @@ macro_rules! println {
 pub fn _print(args: core::fmt::Arguments) {
     with_framebuffer(|fb| {
         with_serial_console(|console| {
-            let mut writer = ConsoleWriter { fb, console };
+            let mut writer = ConsoleWriter {
+                fb,
+                console,
+                should_center: false,
+            };
             let _ = writer.write_fmt(args);
         });
+        fb.swap();
     });
 }
 
@@ -69,13 +79,19 @@ unsafe extern "C" fn kmain() -> ! {
     // All limine requests must also be referenced in a called function, otherwise they may be
     // removed by the linker.
     assert!(BASE_REVISION.is_supported());
-    
+
+    #[cfg(target_arch = "x86_64")]
+    {
+        load_gdt_x86_64();
+        init_idt_x86_64();
+    }
+
     if let Some(framebuffer_response) = FRAMEBUFFER_REQUEST.get_response() {
         if let Some(limine_framebuffer) = framebuffer_response.framebuffers().next() {
             init_framebuffer(&limine_framebuffer);
             with_framebuffer(|mut fb| {
                 let (width, height) = (fb.width.clone(), fb.height.clone());
-                init_serial_console(width / 2, height / 3);
+                init_serial_console(0, 0);
                 rectangle_filled(&mut fb, 0, 0, width, height, rgb(253, 129, 0), true);
                 rectangle_filled(&mut fb, 700, 400, 200, 200, rgb(0, 0, 0), true);
                 rectangle_outline(&mut fb, 400, 400, 100, 100, rgb(0, 0, 0));
@@ -83,7 +99,6 @@ unsafe extern "C" fn kmain() -> ! {
                 circle_outline(&mut fb, 400, 200, 100.0, rgb(0, 0, 0));
                 triangle_outline(&mut fb, 100, 400, 200, 400, 150, 600, rgb(0, 0, 0));
             });
-            panic!("idk, test");
         }
     }
 
@@ -91,20 +106,23 @@ unsafe extern "C" fn kmain() -> ! {
 }
 
 #[panic_handler]
-fn rust_panic(_info: &core::panic::PanicInfo) -> ! {    
-    with_framebuffer(|mut fb|{
+fn rust_panic(_info: &core::panic::PanicInfo) -> ! {
+    with_framebuffer(|mut fb| {
         let (width, height) = (fb.width.clone(), fb.height.clone());
         rectangle_filled(&mut fb, 0, 0, width, height, rgb(180, 0, 0), true);
-        with_serial_console(|serial_console| {
-            serial_console.clear(height / 3);
-            serial_console.render_text(&mut fb, "Kernel Panic! :C\n\n\n");
-            if let Some(message) = _info.message().as_str() {
-                serial_console.render_text(&mut fb, "Message:");
-                serial_console.render_text(&mut fb, message);
-            }
-            crate::println!("Kernel Panic! :C");
-            crate::print!("Message: ");
-            crate::println!("{}", _info);
+
+        with_serial_console(|console| {
+            console.clear(5, 5);
+
+            let mut writer = ConsoleWriter {
+                fb: &mut fb,
+                console,
+                should_center: true,
+            };
+
+            let _ = writer.write_str("KERNEL PANIC\n\n");
+            let _ = writer.write_fmt(core::format_args!("{}", _info));
+            fb.swap();
         });
     });
 

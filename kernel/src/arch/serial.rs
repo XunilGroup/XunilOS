@@ -1,42 +1,64 @@
-use crate::driver::graphics::framebuffer::{with_framebuffer, Framebuffer};
-use crate::driver::graphics::font_render::render_text;
 use crate::driver::graphics::base::rgb;
-use spin::Mutex;
+use crate::driver::graphics::font_render::render_text;
+use crate::driver::graphics::framebuffer::Framebuffer;
 use core::fmt::{self, Write};
-
-const DEFAULT_FONT_SIZE: usize = 3;
+use spin::Mutex;
 
 pub struct ConsoleWriter<'a> {
     pub fb: &'a mut Framebuffer,
     pub console: &'a mut SerialConsole,
+    pub should_center: bool,
 }
 
 impl Write for ConsoleWriter<'_> {
     fn write_str(&mut self, s: &str) -> fmt::Result {
-        self.console.render_text(self.fb, s);
+        self.console.render_text(self.fb, s, 2, false);
         Ok(())
     }
 }
 
 pub struct SerialConsole {
     start_x: usize,
-    current_y: usize
+    pub current_x: usize,
+    current_y: usize,
 }
 
 impl SerialConsole {
     pub fn new(start_x: usize, start_y: usize) -> SerialConsole {
         SerialConsole {
             start_x,
-            current_y: start_y
+            current_x: start_x,
+            current_y: start_y,
         }
     }
 
-    pub fn render_text(&mut self, fb: &mut Framebuffer, text: &str) {
-        self.current_y = render_text(fb, self.start_x - ((text.len() - text.matches('\n').count()) * DEFAULT_FONT_SIZE * 4), self.current_y, text, DEFAULT_FONT_SIZE, rgb(255, 255, 255));
-        self.current_y = render_text(fb, self.start_x - ((text.len() - text.matches('\n').count()) * DEFAULT_FONT_SIZE * 4), self.current_y, "\n", DEFAULT_FONT_SIZE, rgb(255, 255, 255)); // add a newline
+    pub fn render_text(
+        &mut self,
+        fb: &mut Framebuffer,
+        text: &str,
+        font_size: usize,
+        should_center: bool,
+    ) {
+        let (new_x, new_y) = render_text(
+            fb,
+            if should_center {
+                self.current_x - (text.len() - text.matches('\n').count()) * (font_size * 4)
+            } else {
+                self.current_x
+            },
+            self.current_y,
+            text,
+            font_size,
+            rgb(255, 255, 255),
+            self.start_x,
+        );
+        self.current_x = new_x;
+        self.current_y = new_y;
     }
 
-    pub fn clear(&mut self, start_y: usize) {
+    pub fn clear(&mut self, start_x: usize, start_y: usize) {
+        self.start_x = start_x;
+        self.current_x = start_x;
         self.current_y = start_y;
     }
 }
