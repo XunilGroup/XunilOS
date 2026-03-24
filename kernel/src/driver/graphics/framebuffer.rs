@@ -1,6 +1,9 @@
 use limine::framebuffer::Framebuffer as LimineFramebuffer;
 use spin::Mutex;
 
+#[cfg(target_arch = "x86_64")]
+use crate::arch::x86_64::interrupts::without_interrupts;
+
 const MAX_BACKBUFFER_PIXELS: usize = 1920 * 1080;
 static mut BACK_BUFFER: [u32; MAX_BACKBUFFER_PIXELS] = [0; MAX_BACKBUFFER_PIXELS];
 
@@ -62,8 +65,10 @@ pub fn init_framebuffer(raw: &LimineFramebuffer) {
 }
 
 pub fn with_framebuffer<F: FnOnce(&mut Framebuffer)>(f: F) {
-    let mut guard = FRAMEBUFFER.lock();
-    if let Some(fb) = guard.as_mut() {
-        f(fb);
-    }
+    without_interrupts(|| {
+        let mut guard = FRAMEBUFFER.lock();
+        if let Some(fb) = guard.as_mut() {
+            f(fb);
+        }
+    })
 }

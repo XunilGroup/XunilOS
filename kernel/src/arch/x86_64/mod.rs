@@ -1,4 +1,4 @@
 pub mod gdt;
-pub mod idt;
+pub mod init;
 pub mod interrupts;
 pub mod paging;

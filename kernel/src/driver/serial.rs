@@ -4,6 +4,9 @@ use crate::driver::graphics::framebuffer::Framebuffer;
 use core::fmt::{self, Write};
 use spin::Mutex;
 
+#[cfg(target_arch = "x86_64")]
+use crate::arch::x86_64::interrupts::without_interrupts;
+
 pub struct ConsoleWriter<'a> {
     pub fb: &'a mut Framebuffer,
     pub console: &'a mut SerialConsole,
@@ -70,8 +73,10 @@ pub fn init_serial_console(start_x: usize, start_y: usize) {
 }
 
 pub fn with_serial_console<F: FnOnce(&mut SerialConsole)>(f: F) {
-    let mut guard = SERIAL_CONSOLE.lock();
-    if let Some(fb) = guard.as_mut() {
-        f(fb);
-    }
+    without_interrupts(|| {
+        let mut guard = SERIAL_CONSOLE.lock();
+        if let Some(fb) = guard.as_mut() {
+            f(fb);
+        }
+    })
 }
