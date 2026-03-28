@@ -1,3 +1,4 @@
+use crate::{driver::timer::TIMER, println};
 use spin::{Mutex, MutexGuard};
 
 pub struct LinkedNode {
@@ -33,4 +34,11 @@ impl<A> Locked<A> {
     pub fn lock(&self) -> MutexGuard<A> {
         self.inner.lock()
     }
+}
+
+pub fn test_performance<F: FnOnce()>(function: F) {
+    let start = TIMER.now();
+    let ret = function();
+    println!("took {} ms", (TIMER.now() - start).elapsed());
+    ret
 }

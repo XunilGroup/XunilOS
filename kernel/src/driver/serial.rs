@@ -73,10 +73,8 @@ pub fn init_serial_console(start_x: usize, start_y: usize) {
 }
 
 pub fn with_serial_console<F: FnOnce(&mut SerialConsole)>(f: F) {
-    without_interrupts(|| {
-        let mut guard = SERIAL_CONSOLE.lock();
-        if let Some(fb) = guard.as_mut() {
-            f(fb);
-        }
-    })
+    let mut guard = SERIAL_CONSOLE.lock();
+    if let Some(fb) = guard.as_mut() {
+        f(fb);
+    }
 }

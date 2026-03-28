@@ -1,3 +1,4 @@
+use crate::driver::timer::TIMER;
 use crate::{arch::x86_64::gdt, driver::keyboard::keyboard_interrupt_handler, println};
 use lazy_static::lazy_static;
 use pic8259::ChainedPics;
@@ -18,7 +19,7 @@ pub static PICS: Mutex<ChainedPics> =
 #[repr(u8)]
 pub enum InterruptIndex {
     Timer = PIC_1_OFFSET,
-    Keyboard, // putting it below increments it by 1, so its offset + 1
+    Keyboard = PIC_1_OFFSET + 1,
 }
 
 impl InterruptIndex {
@@ -83,6 +84,8 @@ pub extern "x86-interrupt" fn gpf_handler(stack_frame: InterruptStackFrame, erro
 }
 
 extern "x86-interrupt" fn timer_interrupt_handler(_stack_frame: InterruptStackFrame) {
+    TIMER.interrupt();
+
     unsafe {
         PICS.lock()
             .notify_end_of_interrupt(InterruptIndex::Timer.as_u8());

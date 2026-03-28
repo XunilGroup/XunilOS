@@ -23,7 +23,6 @@ pub fn render_char(
                         font_size,
                         font_size,
                         color,
-                        false,
                     );
                 }
             }
