@@ -2,6 +2,7 @@
 #![no_main]
 #![feature(abi_x86_interrupt)]
 
+extern crate alloc;
 use core::fmt::Write;
 
 use limine::BaseRevision;
@@ -10,6 +11,7 @@ use limine::request::{
 };
 pub mod arch;
 pub mod driver;
+pub mod util;
 
 use crate::arch::arch::{idle, init};
 use crate::driver::graphics::base::rgb;
@@ -18,6 +20,7 @@ use crate::driver::graphics::primitives::{
     circle_filled, circle_outline, rectangle_filled, rectangle_outline, triangle_outline,
 };
 use crate::driver::serial::{ConsoleWriter, init_serial_console, with_serial_console};
+use alloc::{boxed::Box, vec::Vec};
 
 /// Sets the base revision to the latest revision supported by the crate.
 /// See specification for further info.
@@ -88,19 +91,18 @@ unsafe extern "C" fn kmain() -> ! {
     if let Some(framebuffer_response) = FRAMEBUFFER_REQUEST.get_response() {
         if let Some(limine_framebuffer) = framebuffer_response.framebuffers().next() {
             init_framebuffer(&limine_framebuffer);
-            // boot_animation();
         }
     }
 
+    init_serial_console(0, 0);
+
     if let Some(hhdm_response) = HHDM_REQUEST.get_response() {
         if let Some(memory_map_response) = MEMORY_MAP_REQUEST.get_response() {
-            let mapper = init(hhdm_response, memory_map_response);
+            let (mapper, frame_allocator) = init(hhdm_response, memory_map_response);
         } else {
-            init_serial_console(0, 0);
             panic!("Could not get required info from Limine's memory map. ")
         }
     } else {
-        init_serial_console(0, 0);
         panic!("Could not get required info from the Limine's higher-half direct mapping. ")
     }
 
@@ -114,6 +116,13 @@ unsafe extern "C" fn kmain() -> ! {
         circle_outline(&mut fb, 400, 200, 100.0, rgb(0, 0, 0));
         triangle_outline(&mut fb, 100, 400, 200, 400, 150, 600, rgb(0, 0, 0));
     });
+
+    let x = Box::new(41);
+    let mut test_vec: Vec<u16> = Vec::new();
+    test_vec.push(5);
+    println!("Before: {:?}", test_vec);
+    test_vec.push(9);
+    println!("After: {:?}", test_vec);
 
     idle();
 }
