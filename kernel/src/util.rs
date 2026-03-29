@@ -42,3 +42,7 @@ pub fn test_performance<F: FnOnce()>(function: F) {
     println!("took {} ms", (TIMER.now() - start).elapsed());
     ret
 }
+
+pub fn get_bit(value: u8, position: u8) -> u8 {
+    (value >> position) & 1
+}

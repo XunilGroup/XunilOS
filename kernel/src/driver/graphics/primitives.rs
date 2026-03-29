@@ -1,9 +1,19 @@
-use crate::driver::graphics::{base::rgb, font_render::render_text, framebuffer::Framebuffer};
-use alloc::{format, string::ToString};
-use core::f32::consts::PI;
-use micromath::F32Ext;
+use crate::driver::graphics::framebuffer::Framebuffer;
 
 pub fn line(framebuffer: &mut Framebuffer, x0: usize, y0: usize, x1: usize, y1: usize, color: u32) {
+    if y0 == y1 {
+        let (xa, xb) = if x0 <= x1 { (x0, x1) } else { (x1, x0) };
+        framebuffer.fill_span(xa, y0, xb - xa + 1, color);
+        return;
+    }
+    if x0 == x1 {
+        let (ya, yb) = if y0 <= y1 { (y0, y1) } else { (y1, y0) };
+        for yy in ya..=yb {
+            framebuffer.put_pixel(x0, yy, color);
+        }
+        return;
+    }
+
     let mut x0 = x0 as isize;
     let mut y0 = y0 as isize;
     let x1 = x1 as isize;
@@ -58,23 +68,58 @@ pub fn triangle_outline(
     line(framebuffer, x2, y2, x3, y3, color);
 }
 
-pub fn circle_outline(framebuffer: &mut Framebuffer, x: usize, y: usize, radius: f32, color: u32) {
-    let mut i: f32 = 0.0;
+pub fn circle_outline(
+    framebuffer: &mut Framebuffer,
+    cx: usize,
+    cy: usize,
+    radius: usize,
+    color: u32,
+) {
+    let mut x = radius as isize;
+    let mut y: isize = 0;
+    let mut d = 1 - x;
+    let cx = cx as isize;
+    let cy = cy as isize;
 
-    loop {
-        i += 0.1;
+    #[inline(always)]
+    fn plot_points(
+        framebuffer: &mut Framebuffer,
+        cx: isize,
+        cy: isize,
+        x: isize,
+        y: isize,
+        color: u32,
+    ) {
+        framebuffer.put_pixel((cx + x) as usize, (cy + y) as usize, color);
+        framebuffer.put_pixel((cx + y) as usize, (cy + x) as usize, color);
+        framebuffer.put_pixel((cx - y) as usize, (cy + x) as usize, color);
+        framebuffer.put_pixel((cx - x) as usize, (cy + y) as usize, color);
+        framebuffer.put_pixel((cx - x) as usize, (cy - y) as usize, color);
+        framebuffer.put_pixel((cx - y) as usize, (cy - x) as usize, color);
+        framebuffer.put_pixel((cx + y) as usize, (cy - x) as usize, color);
+        framebuffer.put_pixel((cx + x) as usize, (cy - y) as usize, color);
+    }
 
-        let x1: f32 = radius * (i * core::f32::consts::PI / 180.0).cos();
-        let y1: f32 = radius * (i * PI / 180.0).sin();
-        framebuffer.put_pixel((x as f32 + x1) as usize, (y as f32 + y1) as usize, color);
+    while y <= x {
+        plot_points(framebuffer, cx, cy, x, y, color);
+        y += 1;
 
-        if i >= 360.0 {
-            break;
+        if d <= 0 {
+            d += 2 * y + 1;
+        } else {
+            x -= 1;
+            d += 2 * (y - x) + 1;
         }
     }
 }
 
-pub fn circle_filled(framebuffer: &mut Framebuffer, x0: usize, y0: usize, radius: f32, color: u32) {
+pub fn circle_filled(
+    framebuffer: &mut Framebuffer,
+    x0: usize,
+    y0: usize,
+    radius: usize,
+    color: u32,
+) {
     let mut x = radius as isize;
     let mut y: isize = 0;
     let mut x_change: isize = 1 - (radius as isize * 2);
@@ -113,10 +158,8 @@ pub fn rectangle_filled(
     height: usize,
     color: u32,
 ) {
-    for fb_x in x..x + width {
-        for fb_y in y..y + height {
-            framebuffer.put_pixel(fb_x, fb_y, color);
-        }
+    for yy in y..y + height {
+        framebuffer.fill_span(x, yy, width, color);
     }
 }
 

@@ -9,7 +9,6 @@ dependencies = [
  "font8x8",
  "lazy_static",
  "limine",
- "micromath",
  "pc-keyboard",
  "pic8259",
  "spin 0.10.0",
@@ -66,12 +65,6 @@ checksum = "224399e74b87b5f3557511d98dff8b14089b3dadafcab6bb93eab67d3aace965"
 dependencies = [
  "scopeguard",
 ]
-
-[[package]]
-name = "micromath"
-version = "2.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c3c8dda44ff03a2f238717214da50f65d5a53b45cd213a7370424ffdb6fae815"
 
 [[package]]
 name = "pc-keyboard"

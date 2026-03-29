@@ -10,6 +10,7 @@ use limine::request::{
     DateAtBootRequest, FramebufferRequest, HhdmRequest, MemoryMapRequest, MpRequest,
     RequestsEndMarker, RequestsStartMarker,
 };
+use x86_64::instructions::interrupts::without_interrupts;
 pub mod arch;
 pub mod driver;
 pub mod util;
@@ -20,6 +21,7 @@ use crate::driver::graphics::framebuffer::{init_framebuffer, with_framebuffer};
 use crate::driver::graphics::primitives::{
     circle_filled, circle_outline, rectangle_filled, rectangle_outline, triangle_outline,
 };
+use crate::driver::mouse::MOUSE;
 use crate::driver::serial::{ConsoleWriter, init_serial_console, with_serial_console};
 use crate::driver::timer::TIMER;
 use crate::util::test_performance;
@@ -89,7 +91,6 @@ pub fn _print(args: core::fmt::Arguments) {
             };
             let _ = writer.write_fmt(args);
         });
-        fb.swap();
     });
 }
 
@@ -99,9 +100,12 @@ unsafe extern "C" fn kmain() -> ! {
     // removed by the linker.
     assert!(BASE_REVISION.is_supported());
 
+    let mapper;
+    let frame_allocator;
+
     if let Some(hhdm_response) = HHDM_REQUEST.get_response() {
         if let Some(memory_map_response) = MEMORY_MAP_REQUEST.get_response() {
-            let (mapper, frame_allocator) = init(hhdm_response, memory_map_response);
+            (mapper, frame_allocator) = init(hhdm_response, memory_map_response);
         } else {
             kernel_crash(); // Could not get required info from Limine's memory map.
         }
@@ -134,25 +138,67 @@ unsafe extern "C" fn kmain() -> ! {
 
     sleep(500);
 
+    let mut current_mouse_x: usize = 100;
+    let mut current_mouse_y: usize = 100;
+    let mut mouse_status = 0;
+    let mut width = 0;
+    let mut height = 0;
+    let mut x_delta = 0;
+    let mut y_delta = 0;
+
     loop {
         with_serial_console(|serial_console| serial_console.clear(0, 0));
+        with_framebuffer(|fb| fb.clear(rgb(253, 129, 0)));
+        test_performance(|| {
+            with_framebuffer(|mut fb| {
+                width = fb.width;
+                height = fb.height;
 
-        with_framebuffer(|mut fb| {
-            fb.clear(rgb(253, 129, 0));
+                rectangle_filled(&mut fb, 700, 400, 200, 200, rgb(0, 0, 0));
+                rectangle_outline(&mut fb, 400, 400, 100, 100, rgb(0, 0, 0));
+                circle_filled(&mut fb, 200, 200, 100, rgb(0, 0, 0));
+                circle_outline(&mut fb, 400, 200, 100, rgb(0, 0, 0));
+                triangle_outline(&mut fb, 100, 400, 200, 400, 150, 600, rgb(0, 0, 0));
+            });
 
-            // rectangle_filled(&mut fb, 700, 400, 200, 200, rgb(0, 0, 0));
-            // rectangle_outline(&mut fb, 400, 400, 100, 100, rgb(0, 0, 0));
-            // circle_filled(&mut fb, 200, 200, 100.0, rgb(0, 0, 0));
+            let (hours, minutes, seconds) =
+                unix_to_hms(TIMER.get_date_at_boot() + (TIMER.now().elapsed()) / 1000);
 
-            circle_outline(&mut fb, 400, 200, 100.0, rgb(0, 0, 0));
-            triangle_outline(&mut fb, 100, 400, 200, 400, 150, 600, rgb(0, 0, 0));
+            mouse_status = MOUSE.get_status();
+            x_delta = MOUSE.get_x_delta() / 5;
+            y_delta = MOUSE.get_y_delta() / 5;
+            if x_delta != 0 {
+                current_mouse_x = (current_mouse_x as isize + x_delta as isize).max(0) as usize;
+            }
+
+            if y_delta != 0 {
+                current_mouse_y = (current_mouse_y as isize + y_delta as isize).max(0) as usize;
+            }
+
+            if current_mouse_x > width {
+                current_mouse_x = width - 15;
+            }
+
+            if current_mouse_y > height {
+                current_mouse_y = height - 15;
+            }
+
+            print!(
+                "{:?}:{:?}:{:?}\n{:?} {:?} {:?} {:?} {:?}",
+                hours,
+                minutes,
+                seconds,
+                mouse_status,
+                current_mouse_x,
+                current_mouse_y,
+                x_delta,
+                y_delta
+            );
         });
-
-        let (hours, minutes, seconds) =
-            unix_to_hms(TIMER.get_date_at_boot() + (TIMER.now().elapsed()) / 1000);
-
-        print!("{:?}:{:?}:{:?}", hours, minutes, seconds);
-
+        with_framebuffer(|fb| {
+            rectangle_filled(fb, current_mouse_x, current_mouse_y, 15, 15, rgb(0, 255, 0));
+            fb.swap();
+        });
         sleep(16);
     }
 }
@@ -182,6 +228,8 @@ fn boot_animation() {
         );
 
         i += 1;
+
+        with_framebuffer(|fb| fb.swap());
 
         sleep(200);
     }

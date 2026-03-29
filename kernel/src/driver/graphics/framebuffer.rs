@@ -32,6 +32,7 @@ impl Framebuffer {
         }
     }
 
+    #[inline(always)]
     pub fn put_pixel(&mut self, x: usize, y: usize, color: u32) {
         if x >= self.width || y >= self.height {
             return;
@@ -43,6 +44,20 @@ impl Framebuffer {
         }
 
         self.back_buffer[idx] = color;
+    }
+
+    #[inline(always)]
+    pub fn fill_span(&mut self, x: usize, y: usize, len: usize, color: u32) {
+        if y >= self.height || x >= self.width || len == 0 {
+            return;
+        }
+        let max_len = self.width - x;
+        let len = core::cmp::min(len, max_len);
+        let start = y * self.pitch + x;
+        let end = start + len;
+        unsafe {
+            self.back_buffer.get_unchecked_mut(start..end).fill(color);
+        }
     }
 
     pub fn swap(&mut self) {
@@ -69,8 +84,10 @@ pub fn init_framebuffer(raw: &LimineFramebuffer) {
 }
 
 pub fn with_framebuffer<F: FnOnce(&mut Framebuffer)>(f: F) {
-    let mut guard = FRAMEBUFFER.lock();
-    if let Some(fb) = guard.as_mut() {
-        f(fb);
-    }
+    without_interrupts(|| {
+        let mut guard = FRAMEBUFFER.lock();
+        if let Some(fb) = guard.as_mut() {
+            f(fb);
+        }
+    })
 }

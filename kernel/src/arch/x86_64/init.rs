@@ -1,5 +1,11 @@
-use crate::arch::x86_64::gdt::load_gdt_x86_64;
-use crate::arch::x86_64::interrupts::{InterruptIndex, PICS, init_idt_x86_64};
+use crate::{
+    arch::x86_64::{
+        gdt::load_gdt_x86_64,
+        interrupts::{PICS, init_idt_x86_64},
+        mouse::setup_mouse,
+    },
+    driver::mouse::MOUSE,
+};
 use limine::response::{HhdmResponse, MemoryMapResponse};
 use x86_64::instructions::interrupts::without_interrupts;
 use x86_64::instructions::{interrupts, port::Port};
@@ -49,9 +55,12 @@ pub fn init_x86_64<'a>(
     unsafe {
         let mut pics = PICS.lock();
         pics.initialize();
-        pics.write_masks(0xFC, 0xFF);
+        let master_mask = 0xF8; // unmask cascade to slave
+        let slave_mask = 0xEF; // unmask mouse interrupt (clear bit 4)
+        pics.write_masks(master_mask, slave_mask);
     }
 
+    let mouse_status = setup_mouse();
     set_pit_interval();
 
     interrupts::enable();
@@ -62,6 +71,8 @@ pub fn init_x86_64<'a>(
     init_heap(&mut mapper, &mut frame_allocator)
         .ok()
         .expect("Failed to initalize heap");
+
+    MOUSE.set_status(mouse_status);
 
     return (mapper, frame_allocator);
 }

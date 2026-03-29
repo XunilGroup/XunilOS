@@ -1,3 +1,5 @@
+use crate::arch::x86_64::mouse::mouse_interrupt;
+use crate::driver::mouse::MOUSE;
 use crate::driver::timer::TIMER;
 use crate::{arch::x86_64::gdt, driver::keyboard::keyboard_interrupt_handler, println};
 use lazy_static::lazy_static;
@@ -20,15 +22,15 @@ pub static PICS: Mutex<ChainedPics> =
 pub enum InterruptIndex {
     Timer = PIC_1_OFFSET,
     Keyboard = PIC_1_OFFSET + 1,
+    Mouse = PIC_2_OFFSET + 4,
+    // RTC = PIC_2_OFFSET,
+    // ATA_primary = PIC_2_OFFSET + 7
+    // ATA_secondary = PIC_2_OFFSET + 8
 }
 
 impl InterruptIndex {
     pub fn as_u8(self) -> u8 {
         self as u8
-    }
-
-    fn as_usize(self) -> usize {
-        usize::from(self.as_u8())
     }
 }
 
@@ -45,6 +47,7 @@ lazy_static! {
         idt.page_fault.set_handler_fn(page_fault_handler);
         idt.general_protection_fault.set_handler_fn(gpf_handler);
         idt[InterruptIndex::Keyboard.as_u8()].set_handler_fn(keyboard_interrupt_handler);
+        idt[InterruptIndex::Mouse.as_u8()].set_handler_fn(mouse_interrupt_handler);
         idt
     };
 }
@@ -89,5 +92,24 @@ extern "x86-interrupt" fn timer_interrupt_handler(_stack_frame: InterruptStackFr
     unsafe {
         PICS.lock()
             .notify_end_of_interrupt(InterruptIndex::Timer.as_u8());
+    }
+}
+
+extern "x86-interrupt" fn mouse_interrupt_handler(_stack_frame: InterruptStackFrame) {
+    let interrupt_result = mouse_interrupt();
+
+    if let Some(interrupt_result) = interrupt_result {
+        MOUSE.interrupt(
+            interrupt_result.0,
+            interrupt_result.1,
+            interrupt_result.2,
+            interrupt_result.3,
+            interrupt_result.4,
+        );
+    }
+
+    unsafe {
+        PICS.lock()
+            .notify_end_of_interrupt(InterruptIndex::Mouse.as_u8());
     }
 }
