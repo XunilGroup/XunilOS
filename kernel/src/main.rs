@@ -129,74 +129,38 @@ unsafe extern "C" fn kmain() -> ! {
 
     boot_animation();
 
-    let x = Box::new(41);
-    let mut test_vec: Vec<u16> = Vec::new();
-    test_vec.push(5);
-    println!("Before: {:?}", test_vec);
-    test_vec.push(9);
-    println!("After: {:?}", test_vec);
-
-    sleep(500);
-
-    let mut current_mouse_x: usize = 100;
-    let mut current_mouse_y: usize = 100;
     let mut mouse_status = 0;
     let mut width = 0;
     let mut height = 0;
-    let mut x_delta = 0;
-    let mut y_delta = 0;
 
     loop {
         with_serial_console(|serial_console| serial_console.clear(0, 0));
         with_framebuffer(|fb| fb.clear(rgb(253, 129, 0)));
         test_performance(|| {
+            mouse_status = MOUSE.get_status();
             with_framebuffer(|mut fb| {
                 width = fb.width;
                 height = fb.height;
+                MOUSE.update(width, height);
 
                 rectangle_filled(&mut fb, 700, 400, 200, 200, rgb(0, 0, 0));
                 rectangle_outline(&mut fb, 400, 400, 100, 100, rgb(0, 0, 0));
                 circle_filled(&mut fb, 200, 200, 100, rgb(0, 0, 0));
                 circle_outline(&mut fb, 400, 200, 100, rgb(0, 0, 0));
                 triangle_outline(&mut fb, 100, 400, 200, 400, 150, 600, rgb(0, 0, 0));
+
+                MOUSE.draw(fb);
             });
 
             let (hours, minutes, seconds) =
                 unix_to_hms(TIMER.get_date_at_boot() + (TIMER.now().elapsed()) / 1000);
 
-            mouse_status = MOUSE.get_status();
-            x_delta = MOUSE.get_x_delta() / 5;
-            y_delta = MOUSE.get_y_delta() / 5;
-            if x_delta != 0 {
-                current_mouse_x = (current_mouse_x as isize + x_delta as isize).max(0) as usize;
-            }
-
-            if y_delta != 0 {
-                current_mouse_y = (current_mouse_y as isize + y_delta as isize).max(0) as usize;
-            }
-
-            if current_mouse_x > width {
-                current_mouse_x = width - 15;
-            }
-
-            if current_mouse_y > height {
-                current_mouse_y = height - 15;
-            }
-
             print!(
-                "{:?}:{:?}:{:?}\n{:?} {:?} {:?} {:?} {:?}",
-                hours,
-                minutes,
-                seconds,
-                mouse_status,
-                current_mouse_x,
-                current_mouse_y,
-                x_delta,
-                y_delta
+                "{:?}:{:?}:{:?}\nMouse status: {:?}",
+                hours, minutes, seconds, mouse_status
             );
         });
         with_framebuffer(|fb| {
-            rectangle_filled(fb, current_mouse_x, current_mouse_y, 15, 15, rgb(0, 255, 0));
             fb.swap();
         });
         sleep(16);

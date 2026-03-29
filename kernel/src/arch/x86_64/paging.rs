@@ -24,7 +24,6 @@ pub unsafe fn initialize_paging(physical_memory_offset: VirtAddr) -> OffsetPageT
 }
 
 pub struct XunilFrameAllocator<'a> {
-    next: usize,
     memory_map: &'a [&'a Entry],
     region_index: usize,
     region_offset: usize,
@@ -38,7 +37,6 @@ impl<'a> XunilFrameAllocator<'a> {
             .unwrap();
 
         Self {
-            next: 0,
             memory_map,
             region_index,
             region_offset: 0,
