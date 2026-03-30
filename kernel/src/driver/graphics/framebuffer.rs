@@ -4,7 +4,7 @@ use limine::framebuffer::Framebuffer as LimineFramebuffer;
 use spin::Mutex;
 
 #[cfg(target_arch = "x86_64")]
-use crate::arch::x86_64::interrupts::without_interrupts;
+use x86_64::instructions::interrupts::without_interrupts;
 
 pub struct Framebuffer {
     addr: *mut u32,

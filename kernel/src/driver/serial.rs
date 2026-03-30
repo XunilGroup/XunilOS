@@ -5,7 +5,7 @@ use core::fmt::{self, Write};
 use spin::Mutex;
 
 #[cfg(target_arch = "x86_64")]
-use crate::arch::x86_64::interrupts::without_interrupts;
+use x86_64::instructions::interrupts::without_interrupts;
 
 pub struct ConsoleWriter<'a> {
     pub fb: &'a mut Framebuffer,

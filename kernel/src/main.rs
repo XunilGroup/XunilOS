@@ -10,9 +10,9 @@ use limine::request::{
     DateAtBootRequest, FramebufferRequest, HhdmRequest, MemoryMapRequest, MpRequest,
     RequestsEndMarker, RequestsStartMarker,
 };
-use x86_64::instructions::interrupts::without_interrupts;
 pub mod arch;
 pub mod driver;
+pub mod userspace_stub;
 pub mod util;
 
 use crate::arch::arch::{infinite_idle, init, kernel_crash, sleep};
@@ -24,9 +24,7 @@ use crate::driver::graphics::primitives::{
 use crate::driver::mouse::MOUSE;
 use crate::driver::serial::{ConsoleWriter, init_serial_console, with_serial_console};
 use crate::driver::timer::TIMER;
-use crate::util::test_performance;
-use alloc::{boxed::Box, string::ToString, vec::Vec};
-
+use crate::userspace_stub::userspace_init;
 /// Sets the base revision to the latest revision supported by the crate.
 /// See specification for further info.
 /// Be sure to mark all limine requests with #[used], otherwise they may be removed by the compiler.
@@ -127,92 +125,7 @@ unsafe extern "C" fn kmain() -> ! {
         println!("Could not get date at boot. Will default to 0.")
     }
 
-    boot_animation();
-
-    let mut mouse_status = 0;
-    let mut width = 0;
-    let mut height = 0;
-
-    loop {
-        with_serial_console(|serial_console| serial_console.clear(0, 0));
-        with_framebuffer(|fb| fb.clear(rgb(253, 129, 0)));
-        test_performance(|| {
-            mouse_status = MOUSE.get_status();
-            with_framebuffer(|mut fb| {
-                width = fb.width;
-                height = fb.height;
-                MOUSE.update(width, height);
-
-                rectangle_filled(&mut fb, 700, 400, 200, 200, rgb(0, 0, 0));
-                rectangle_outline(&mut fb, 400, 400, 100, 100, rgb(0, 0, 0));
-                circle_filled(&mut fb, 200, 200, 100, rgb(0, 0, 0));
-                circle_outline(&mut fb, 400, 200, 100, rgb(0, 0, 0));
-                triangle_outline(&mut fb, 100, 400, 200, 400, 150, 600, rgb(0, 0, 0));
-
-                MOUSE.draw(fb);
-            });
-
-            let (hours, minutes, seconds) =
-                unix_to_hms(TIMER.get_date_at_boot() + (TIMER.now().elapsed()) / 1000);
-
-            print!(
-                "{:?}:{:?}:{:?}\nMouse status: {:?}",
-                hours, minutes, seconds, mouse_status
-            );
-        });
-        with_framebuffer(|fb| {
-            fb.swap();
-        });
-        sleep(16);
-    }
-}
-
-fn boot_animation() {
-    let mut i = 1;
-
-    while i < 10 {
-        let mut width = 0;
-        let mut height = 0;
-
-        with_framebuffer(|fb| {
-            fb.clear(rgb(253, 129, 0));
-            width = fb.width;
-            height = fb.height;
-        });
-
-        let text_width = ("XunilOS Loading".len() + ".".repeat(i).len()) * 4 * 2;
-
-        with_serial_console(|serial_console| {
-            serial_console.clear(width / 2 - text_width / 2, height / 2)
-        });
-
-        println!(
-            "{}",
-            "XunilOS Loading".to_string() + &".".repeat(i).as_str()
-        );
-
-        i += 1;
-
-        with_framebuffer(|fb| fb.swap());
-
-        sleep(200);
-    }
-
-    with_serial_console(|serial_console| {
-        serial_console.clear(0, 0);
-    });
-
-    with_framebuffer(|fb| {
-        fb.clear(rgb(253, 129, 0));
-    });
-}
-
-fn unix_to_hms(timestamp: u64) -> (u64, u64, u64) {
-    let seconds = timestamp % 86400;
-    let h = seconds / 3600;
-    let m = (seconds % 3600) / 60;
-    let s = seconds % 60;
-    (h, m, s)
+    userspace_init()
 }
 
 #[panic_handler]

@@ -1,12 +1,18 @@
-use crate::arch::x86_64::mouse::mouse_interrupt;
-use crate::driver::mouse::MOUSE;
-use crate::driver::timer::TIMER;
-use crate::{arch::x86_64::gdt, driver::keyboard::keyboard_interrupt_handler, println};
+use crate::{
+    arch::x86_64::{gdt, mouse::mouse_interrupt},
+    driver::{
+        keyboard::{KEYBOARD_STATE, KeyboardEvent},
+        mouse::MOUSE,
+        timer::TIMER,
+    },
+    println,
+};
 use lazy_static::lazy_static;
+use pc_keyboard::DecodedKey;
 use pic8259::ChainedPics;
 use spin::Mutex;
-pub use x86_64::instructions::interrupts::without_interrupts;
 use x86_64::{
+    instructions::port::Port,
     registers::control::Cr2,
     structures::idt::{InterruptDescriptorTable, InterruptStackFrame, PageFaultErrorCode},
 };
@@ -111,5 +117,29 @@ extern "x86-interrupt" fn mouse_interrupt_handler(_stack_frame: InterruptStackFr
     unsafe {
         PICS.lock()
             .notify_end_of_interrupt(InterruptIndex::Mouse.as_u8());
+    }
+}
+
+pub extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStackFrame) {
+    let mut port = Port::new(0x60);
+    let scancode: u8 = unsafe { port.read() };
+    let mut keyboard_state = KEYBOARD_STATE.lock();
+
+    if let Ok(Some(key_event)) = keyboard_state.keyboard.add_byte(scancode) {
+        if let Some(key) = keyboard_state.keyboard.process_keyevent(key_event) {
+            match key {
+                DecodedKey::Unicode(character) => keyboard_state
+                    .event_queue
+                    .push_back(KeyboardEvent::Unicode(character)),
+                DecodedKey::RawKey(key) => keyboard_state
+                    .event_queue
+                    .push_back(KeyboardEvent::RawKey(key)),
+            }
+        }
+    }
+
+    unsafe {
+        PICS.lock()
+            .notify_end_of_interrupt(InterruptIndex::Keyboard.as_u8());
     }
 }
