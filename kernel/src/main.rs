@@ -15,13 +15,9 @@ pub mod driver;
 pub mod userspace_stub;
 pub mod util;
 
-use crate::arch::arch::{infinite_idle, init, kernel_crash, sleep};
+use crate::arch::arch::{infinite_idle, init, kernel_crash};
 use crate::driver::graphics::base::rgb;
 use crate::driver::graphics::framebuffer::{init_framebuffer, with_framebuffer};
-use crate::driver::graphics::primitives::{
-    circle_filled, circle_outline, rectangle_filled, rectangle_outline, triangle_outline,
-};
-use crate::driver::mouse::MOUSE;
 use crate::driver::serial::{ConsoleWriter, init_serial_console, with_serial_console};
 use crate::driver::timer::TIMER;
 use crate::userspace_stub::userspace_init;
@@ -98,8 +94,8 @@ unsafe extern "C" fn kmain() -> ! {
     // removed by the linker.
     assert!(BASE_REVISION.is_supported());
 
-    let mapper;
-    let frame_allocator;
+    let mut mapper;
+    let mut frame_allocator;
 
     if let Some(hhdm_response) = HHDM_REQUEST.get_response() {
         if let Some(memory_map_response) = MEMORY_MAP_REQUEST.get_response() {
@@ -125,14 +121,13 @@ unsafe extern "C" fn kmain() -> ! {
         println!("Could not get date at boot. Will default to 0.")
     }
 
-    userspace_init()
+    userspace_init(&mut frame_allocator, &mut mapper)
 }
 
 #[panic_handler]
 fn rust_panic(_info: &core::panic::PanicInfo) -> ! {
     with_framebuffer(|mut fb| {
-        let (width, height) = (fb.width.clone(), fb.height.clone());
-        rectangle_filled(&mut fb, 0, 0, width, height, rgb(180, 0, 0));
+        fb.clear(rgb(180, 0, 0));
 
         with_serial_console(|console| {
             console.clear(5, 5);

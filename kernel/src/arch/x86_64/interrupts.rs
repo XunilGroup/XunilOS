@@ -12,6 +12,7 @@ use pc_keyboard::DecodedKey;
 use pic8259::ChainedPics;
 use spin::Mutex;
 use x86_64::{
+    VirtAddr,
     instructions::port::Port,
     registers::control::Cr2,
     structures::idt::{InterruptDescriptorTable, InterruptStackFrame, PageFaultErrorCode},
@@ -48,12 +49,17 @@ lazy_static! {
             idt.double_fault
                 .set_handler_fn(double_fault_handler)
                 .set_stack_index(gdt::DOUBLE_FAULT_IST_INDEX);
+            #[allow(function_casts_as_integer)]
+            idt[0x80]
+                .set_handler_addr(VirtAddr::new(syscall_interrupt_handler as u64))
+                .set_privilege_level(x86_64::PrivilegeLevel::Ring3);
         }
         idt[InterruptIndex::Timer.as_u8()].set_handler_fn(timer_interrupt_handler);
         idt.page_fault.set_handler_fn(page_fault_handler);
         idt.general_protection_fault.set_handler_fn(gpf_handler);
         idt[InterruptIndex::Keyboard.as_u8()].set_handler_fn(keyboard_interrupt_handler);
         idt[InterruptIndex::Mouse.as_u8()].set_handler_fn(mouse_interrupt_handler);
+        idt.invalid_opcode.set_handler_fn(invalid_opcode_handler);
         idt
     };
 }
@@ -90,6 +96,10 @@ pub extern "x86-interrupt" fn gpf_handler(stack_frame: InterruptStackFrame, erro
         "EXCEPTION: GENERAL PROTECTION FAULT\nError Code: {:?}\n{:#?}",
         error_code, stack_frame
     );
+}
+
+pub extern "x86-interrupt" fn invalid_opcode_handler(stack_frame: InterruptStackFrame) {
+    panic!("EXCEPTION: INVALID OPCODE\n{:#?}", stack_frame);
 }
 
 extern "x86-interrupt" fn timer_interrupt_handler(_stack_frame: InterruptStackFrame) {
@@ -142,4 +152,50 @@ pub extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: Interrupt
         PICS.lock()
             .notify_end_of_interrupt(InterruptIndex::Keyboard.as_u8());
     }
+}
+
+#[unsafe(naked)]
+unsafe extern "C" fn syscall_interrupt_handler() {
+    core::arch::naked_asm!(
+        // push all registers
+        "push r15",
+        "push r14",
+        "push r13",
+        "push r12",
+        "push r11",
+        "push r10",
+        "push r9",
+        "push r8",
+        "push rbp",
+        "push rbx",
+        "push rcx",
+        "push rdx",
+        "push rsi",
+        "push rdi",
+        "push rax",
+        "sub rsp, 8",
+        "mov rcx, rdx", // arg2
+        "mov rdx, rsi", // arg1
+        "mov rsi, rdi", // arg0
+        "mov rdi, rax", // num
+        "call syscall_dispatch",
+        "add rsp, 8",
+        "add rsp, 8",
+        // pop them in reverse orser
+        "pop rbx",
+        "pop rcx",
+        "pop rdx",
+        "pop rsi",
+        "pop rdi",
+        "pop rbp",
+        "pop r8",
+        "pop r9",
+        "pop r10",
+        "pop r11",
+        "pop r12",
+        "pop r13",
+        "pop r14",
+        "pop r15",
+        "iretq",
+    )
 }

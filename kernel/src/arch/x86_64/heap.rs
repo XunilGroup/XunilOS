@@ -17,7 +17,7 @@ fn align_up(addr: usize, align: usize) -> usize {
 }
 
 #[global_allocator]
-static ALLOCATOR: Locked<LinkedListAllocator> = Locked::new(LinkedListAllocator::new());
+pub static ALLOCATOR: Locked<LinkedListAllocator> = Locked::new(LinkedListAllocator::new());
 
 pub const HEAP_START: usize = 0x_4444_4444_0000;
 pub const HEAP_SIZE: usize = 256 * 1024 * 1024; // 256 MiB
