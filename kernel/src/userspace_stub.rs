@@ -2,7 +2,10 @@ use alloc::string::ToString;
 use x86_64::structures::paging::OffsetPageTable;
 
 use crate::{
-    arch::{arch::run_elf, x86_64::paging::XunilFrameAllocator},
+    arch::{
+        arch::{run_elf, sleep},
+        x86_64::paging::XunilFrameAllocator,
+    },
     driver::{
         elf::loader::load_file,
         graphics::{
@@ -43,7 +46,7 @@ fn boot_animation() {
         let mut height = 0;
 
         with_framebuffer(|fb| {
-            fb.clear(rgb(253, 129, 0));
+            fb.clear(rgb(77, 171, 245));
             width = fb.width;
             height = fb.height;
         });
@@ -71,7 +74,7 @@ fn boot_animation() {
     });
 
     with_framebuffer(|fb| {
-        fb.clear(rgb(253, 129, 0));
+        fb.clear(rgb(77, 171, 245));
     });
 }
 
@@ -81,8 +84,10 @@ pub fn userspace_init(
 ) -> ! {
     // this is just a stub
 
+    boot_animation();
+
     let entry_point = load_file(frame_allocator, mapper, TEST_ELF_BYTES);
-    println!("{:?}", entry_point);
+    println!("Entry point: {:?}", entry_point);
 
     with_framebuffer(|fb| fb.swap());
 
@@ -100,7 +105,7 @@ pub fn userspace_init(
 
     // loop {
     //     with_serial_console(|serial_console| serial_console.clear(0, 0));
-    //     with_framebuffer(|fb| fb.clear(rgb(253, 129, 0)));
+    //     with_framebuffer(|fb| fb.clear(rgb(77, 171, 245)));
     //     test_performance(|| {
     //         mouse_status = MOUSE.get_status();
     //         with_framebuffer(|mut fb| {
