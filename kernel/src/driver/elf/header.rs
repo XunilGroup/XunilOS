@@ -101,6 +101,39 @@ pub const AT_UID: u64 = 11;
 pub const AT_GID: u64 = 13;
 pub const AT_NULL: u64 = 0;
 
+// Dynamic structure types
+pub const DT_NULL: i64 = 0;
+pub const DT_NEEDED: i64 = 1;
+pub const DT_PLTRELSZ: i64 = 2;
+pub const DT_PLTGOT: i64 = 3;
+pub const DT_HASH: i64 = 4;
+pub const DT_STRTAB: i64 = 5;
+pub const DT_SYMTAB: i64 = 6;
+pub const DT_RELA: i64 = 7;
+pub const DT_RELASZ: i64 = 8;
+pub const DT_RELAENT: i64 = 9;
+pub const DT_STRSZ: i64 = 10;
+pub const DT_SYMENT: i64 = 11;
+pub const DT_INIT: i64 = 12;
+pub const DT_FINI: i64 = 13;
+pub const DT_SONAME: i64 = 14;
+pub const DT_RPATH: i64 = 15;
+pub const DT_SYMBOLIC: i64 = 16;
+pub const DT_REL: i64 = 17;
+pub const DT_RELSZ: i64 = 18;
+pub const DT_RELENT: i64 = 19;
+pub const DT_PLTREL: i64 = 20;
+pub const DT_DEBUG: i64 = 21;
+pub const DT_TEXTREL: i64 = 22;
+pub const DT_JMPREL: i64 = 23;
+pub const DT_BIND_NOW: i64 = 24;
+pub const DT_RUNPATH: i64 = 29;
+pub const DT_FLAGS: i64 = 30;
+pub const DT_GNU_HASH: i64 = 0x6ffffef5;
+pub const DT_VERSYM: i64 = 0x6ffffff0;
+pub const DT_VERNEED: i64 = 0x6ffffffe;
+pub const DT_VERNEEDNUM: i64 = 0x6fffffff;
+
 #[repr(C)]
 pub struct Elf64Ehdr {
     pub e_ident: [u8; 16],
@@ -153,6 +186,13 @@ pub struct Elf64Sym {
     pub st_shndx: u16,
     pub st_value: u64,
     pub st_size: u64,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug)]
+pub struct Elf64Dyn {
+    pub d_tag: i64,
+    pub d_val: u64,
 }
 
 #[repr(C)]

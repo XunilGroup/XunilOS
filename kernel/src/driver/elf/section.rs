@@ -11,25 +11,29 @@ pub unsafe fn elf_section(hdr: *const Elf64Ehdr, idx: usize) -> *const Elf64Shdr
     unsafe { elf_sheader(hdr).add(idx) }
 }
 
-// pub unsafe fn elf_str_table(hdr: *const Elf64Ehdr) -> *const u8 {
-//     if unsafe { (*hdr).e_shstrndx == SHN_UNDEF } {
-//         return core::ptr::null();
-//     }
+pub unsafe fn elf_str_table(hdr: *const Elf64Ehdr) -> *const u8 {
+    if unsafe { (*hdr).e_shstrndx == SHN_UNDEF } {
+        return core::ptr::null();
+    }
 
-//     let shdr = unsafe { elf_section(hdr, (*hdr).e_shstrndx as usize) };
+    let shdr = unsafe { elf_section(hdr, (*hdr).e_shstrndx as usize) };
 
-//     unsafe { (hdr as *const u8).add((*shdr).sh_offset as usize) }
-// }
+    unsafe { (hdr as *const u8).add((*shdr).sh_offset as usize) }
+}
 
-// pub unsafe fn elf_lookup_string(hdr: *const Elf64Ehdr, offset: usize) -> *const u8 {
-//     let str_tab: *const u8 = unsafe { elf_str_table(hdr) };
+fn elf_lookup_string<'a>(hdr: *const Elf64Ehdr, offset: usize) -> &'a str {
+    let strtab: *const u8 = unsafe { elf_str_table(hdr) };
+    let mut len = 0;
 
-//     if str_tab.is_null() {
-//         return core::ptr::null();
-//     }
+    let start = unsafe { strtab.add(offset) };
 
-//     return unsafe { str_tab.add(offset) };
-// }
+    unsafe {
+        while *start.add(len) != 0 {
+            len += 1;
+        }
+        core::str::from_raw_parts(start, len)
+    }
+}
 
 pub fn elf_lookup_symbol(name: &CStr) -> *const u8 {
     return core::ptr::null();

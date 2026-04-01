@@ -35,6 +35,32 @@ extern "C" fn puts(s: *const u8) -> isize {
     0
 }
 
+#[unsafe(no_mangle)]
+extern "C" fn abs(n: i32) -> i32 {
+    n.abs()
+}
+
+#[unsafe(no_mangle)]
+extern "C" fn atoi(mut c: *const u8) -> i32 {
+    let mut value: i32 = 0;
+    let mut sign: i32 = 1;
+    unsafe {
+        if (*c) == b'+' || (*c) == b'-' {
+            if *c == b'-' {
+                sign = -1;
+            }
+            c = c.add(1);
+        }
+        while (*c).is_ascii_digit() {
+            value *= 10;
+            value += ((*c) - b'0') as i32;
+            c = c.add(1);
+        }
+    }
+
+    value * sign
+}
+
 #[panic_handler]
 fn panic(_: &core::panic::PanicInfo) -> ! {
     loop {}

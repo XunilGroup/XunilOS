@@ -39,6 +39,10 @@ pub unsafe fn free(ptr: *mut u8, size: usize, align: usize) {
     }
 }
 
+pub unsafe fn memset(ptr: *mut u8, val: u8, count: usize) {
+    unsafe { core::ptr::write_bytes(ptr, val, count) };
+}
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn syscall_dispatch(
     num: usize,
@@ -63,10 +67,6 @@ pub unsafe extern "C" fn syscall_dispatch(
         }
         _ => -38, // syscall not found
     }
-}
-
-pub unsafe fn memset(ptr: *mut u8, val: u8, count: usize) {
-    unsafe { core::ptr::write_bytes(ptr, val, count) };
 }
 
 pub type Fd = i32;

@@ -1,7 +1,8 @@
 #![no_std]
 #![no_main]
 #![feature(abi_x86_interrupt)]
-
+#![feature(str_from_raw_parts)]
+#![allow(warnings)]
 extern crate alloc;
 use core::fmt::Write;
 

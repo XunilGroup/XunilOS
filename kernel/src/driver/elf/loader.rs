@@ -36,8 +36,8 @@ pub fn load_file(
     }
 
     return match elf_header.e_type {
-        ET_EXEC => unsafe { load_program(frame_allocator, mapper, elf_header, elf_bytes) },
-        ET_DYN => return null(), // TODO
+        ET_EXEC => unsafe { load_program(frame_allocator, mapper, elf_header, elf_bytes, false) },
+        ET_DYN => unsafe { load_program(frame_allocator, mapper, elf_header, elf_bytes, true) }, // TODO
         ET_REL => return null(),
         _ => return null(),
     };
