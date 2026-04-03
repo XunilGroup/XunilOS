@@ -13,6 +13,8 @@ use limine::request::{
 };
 pub mod arch;
 pub mod driver;
+pub mod mm;
+pub mod task;
 pub mod userspace_stub;
 pub mod util;
 

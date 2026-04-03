@@ -3,7 +3,11 @@ use core::{
     ptr::null_mut,
 };
 
-use crate::{arch::arch::get_allocator, driver::graphics::framebuffer::with_framebuffer, println};
+use crate::{
+    arch::arch::{get_allocator, infinite_idle},
+    driver::graphics::framebuffer::with_framebuffer,
+    println,
+};
 
 const SYS_EXIT: usize = 1;
 const SYS_WRITE: usize = 60;
@@ -63,7 +67,7 @@ pub unsafe extern "C" fn syscall_dispatch(
         SYS_EXIT => {
             println!("Program exit.");
             with_framebuffer(|fb| fb.swap());
-            0
+            infinite_idle();
         }
         _ => -38, // syscall not found
     }

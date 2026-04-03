@@ -1,5 +1,5 @@
 use crate::arch::x86_64::paging::XunilFrameAllocator;
-use crate::util::{LinkedNode, Locked};
+use crate::util::Locked;
 use core::{
     alloc::{GlobalAlloc, Layout},
     ptr::null_mut,
@@ -21,6 +21,25 @@ pub static ALLOCATOR: Locked<LinkedListAllocator> = Locked::new(LinkedListAlloca
 
 pub const HEAP_START: usize = 0x_4444_4444_0000;
 pub const HEAP_SIZE: usize = 256 * 1024 * 1024; // 256 MiB
+
+pub struct LinkedNode {
+    pub size: usize,
+    pub next: Option<&'static mut LinkedNode>,
+}
+
+impl LinkedNode {
+    pub const fn new(size: usize) -> LinkedNode {
+        LinkedNode { size, next: None }
+    }
+
+    pub fn start_addr(&self) -> usize {
+        self as *const Self as usize
+    }
+
+    pub fn end_addr(&self) -> usize {
+        self.start_addr() + self.size
+    }
+}
 
 pub struct LinkedListAllocator {
     head: LinkedNode,

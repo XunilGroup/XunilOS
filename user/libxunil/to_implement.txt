@@ -1,17 +1,36 @@
 abs
+atof
 atoi
 calloc
 __ctype_toupper_loc
+__errno_location
+exit
+fclose
+fflush
+fopen
 fprintf
+fread
 free
+fseek
+ftell
+fwrite
+__isoc23_sscanf
 malloc
 memcpy
 memset
+mkdir
 printf
+putchar
+puts
 realloc
+remove
+rename
+snprintf
 __stack_chk_fail
 stderr
+stdout
 strcasecmp
+strchr
 strcmp
 strdup
 strlen
@@ -19,4 +38,8 @@ strncasecmp
 strncmp
 strncpy
 strrchr
+strstr
+system
 toupper
+vfprintf // this
+vsnprintf // also this

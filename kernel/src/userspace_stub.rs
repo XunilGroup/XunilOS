@@ -91,7 +91,7 @@ pub fn userspace_init(
 
     with_framebuffer(|fb| fb.swap());
 
-    run_elf(entry_point, frame_allocator, mapper);
+    run_elf(entry_point, frame_allocator);
 
     loop {}
 

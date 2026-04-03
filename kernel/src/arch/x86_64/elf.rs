@@ -6,13 +6,20 @@ use x86_64::{
     },
 };
 
-use crate::arch::x86_64::{paging::XunilFrameAllocator, usermode::enter_usermode_x86_64};
+use crate::{
+    arch::x86_64::{paging::XunilFrameAllocator, usermode::enter_usermode_x86_64},
+    task::{process::Process, scheduler::SCHEDULER},
+};
 
-pub fn run_elf_x86_64(
-    entry_point: *const u8,
-    frame_allocator: &mut XunilFrameAllocator,
-    mapper: &mut OffsetPageTable,
-) {
+pub fn run_elf_x86_64(entry_point: *const u8, frame_allocator: &mut XunilFrameAllocator) {
+    let process_pid = SCHEDULER
+        .spawn_process(entry_point as u64, frame_allocator)
+        .unwrap();
+
+    SCHEDULER.with_process(process_pid, |process| {
+        process.address_space.use_address_space()
+    });
+
     let stack_base: u64 = 0x0000_7fff_0000_0000;
     let page_count = 3;
     let page_size = 0x1000u64;
@@ -26,17 +33,21 @@ pub fn run_elf_x86_64(
         let page = Page::<Size4KiB>::containing_address(virt_addr);
 
         unsafe {
-            mapper
-                .map_to(
-                    page,
-                    frame,
-                    PageTableFlags::PRESENT
-                        | PageTableFlags::WRITABLE
-                        | PageTableFlags::USER_ACCESSIBLE,
-                    frame_allocator,
-                )
-                .unwrap()
-                .flush();
+            SCHEDULER.with_process(process_pid, |process| {
+                process
+                    .address_space
+                    .mapper
+                    .map_to(
+                        page,
+                        frame,
+                        PageTableFlags::PRESENT
+                            | PageTableFlags::WRITABLE
+                            | PageTableFlags::USER_ACCESSIBLE,
+                        frame_allocator,
+                    )
+                    .unwrap()
+                    .flush();
+            });
         }
     }
 

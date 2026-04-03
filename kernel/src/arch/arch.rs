@@ -26,12 +26,8 @@ pub fn enter_usermode(user_rip: u64, user_rsp: u64) {
 }
 
 #[cfg(target_arch = "x86_64")]
-pub fn run_elf(
-    entry_point: *const u8,
-    frame_allocator: &mut XunilFrameAllocator,
-    mapper: &mut OffsetPageTable,
-) {
-    run_elf_x86_64(entry_point, frame_allocator, mapper);
+pub fn run_elf(entry_point: *const u8, frame_allocator: &mut XunilFrameAllocator) {
+    run_elf_x86_64(entry_point, frame_allocator);
 }
 
 pub fn get_allocator<'a>() -> &'static impl GlobalAlloc {

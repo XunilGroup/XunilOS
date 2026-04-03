@@ -28,7 +28,8 @@ pub fn memory_management_init<'a>(
 ) -> (OffsetPageTable<'static>, XunilFrameAllocator<'a>) {
     let physical_offset = VirtAddr::new(hhdm_response.offset());
     let mapper = unsafe { initialize_paging(physical_offset) };
-    let frame_allocator = XunilFrameAllocator::new(memory_map_response.entries());
+    let frame_allocator =
+        XunilFrameAllocator::new(hhdm_response.offset(), memory_map_response.entries());
     (mapper, frame_allocator)
 }
 
