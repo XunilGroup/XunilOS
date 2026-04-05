@@ -12,7 +12,7 @@ use x86_64::{
 };
 
 use crate::{
-    arch::x86_64::paging::XunilFrameAllocator,
+    arch::arch::FRAME_ALLOCATOR,
     driver::{
         elf::{
             header::{
@@ -40,12 +40,11 @@ pub fn get_vaddr(phdr: *const Elf64Phdr, load_bias: u64) -> *mut u8 {
 }
 
 pub unsafe fn load_program(
-    frame_allocator: &mut XunilFrameAllocator,
     mapper: &mut OffsetPageTable,
     hdr: *const Elf64Ehdr,
     elf_bytes: &[u8],
     pie: bool,
-) -> *const u8 {
+) -> (*const u8, u64) {
     let phdr = unsafe { elf_pheader(hdr) };
     let phnum = unsafe { (*hdr).e_phnum };
     let mut program_headers: Vec<*const Elf64Phdr> = Vec::new();
@@ -64,9 +63,23 @@ pub unsafe fn load_program(
 
     if !pie {
         for program_header in program_headers {
-            load_segment_to_memory(frame_allocator, mapper, program_header, elf_bytes, 0);
+            load_segment_to_memory(mapper, program_header, elf_bytes, 0);
         }
-        return unsafe { (*hdr).e_entry as *const u8 };
+
+        let mut highest_seg = 0;
+
+        for i in 0..phnum {
+            let program_header = unsafe { phdr.add(i as usize) };
+            let seg_end = unsafe { (*program_header).p_vaddr + (*program_header).p_memsz };
+            if seg_end > highest_seg {
+                highest_seg = seg_end;
+            }
+        }
+
+        return (
+            unsafe { (*hdr).e_entry as *const u8 },
+            align_up(highest_seg as u64, 4096),
+        );
     } else {
         let base_address = 0x0000_0100_0000; // TODO: add per-process memory
         let min_vaddr = align_down(
@@ -80,18 +93,23 @@ pub unsafe fn load_program(
 
         let load_bias = base_address - min_vaddr;
 
+        let mut highest_seg = 0;
+
+        for i in 0..phnum {
+            let program_header = unsafe { phdr.add(i as usize) };
+            let seg_end =
+                unsafe { (*program_header).p_vaddr + (*program_header).p_memsz + load_bias };
+            if seg_end > highest_seg {
+                highest_seg = seg_end;
+            }
+        }
+
         for program_header in program_headers {
-            load_segment_to_memory(
-                frame_allocator,
-                mapper,
-                program_header,
-                elf_bytes,
-                load_bias,
-            );
+            load_segment_to_memory(mapper, program_header, elf_bytes, load_bias);
         }
 
         if pt_dynamic_header.is_null() {
-            return null();
+            return (null(), 0);
         }
 
         parse_dyn(
@@ -101,7 +119,10 @@ pub unsafe fn load_program(
             load_bias,
         );
 
-        return unsafe { ((*hdr).e_entry + load_bias) as *const u8 };
+        return (
+            unsafe { ((*hdr).e_entry + load_bias) as *const u8 },
+            align_up(highest_seg as u64, 4096),
+        );
     }
 }
 
@@ -261,7 +282,6 @@ fn parse_dyn(
 }
 
 pub fn load_segment_to_memory(
-    frame_allocator: &mut XunilFrameAllocator,
     mapper: &mut OffsetPageTable,
     phdr: *const Elf64Phdr,
     elf_bytes: &[u8],
@@ -299,6 +319,8 @@ pub fn load_segment_to_memory(
     let end_page: Page<Size4KiB> = Page::containing_address(VirtAddr::new(seg_end - 1));
     let page_range = Page::range_inclusive(start_page, end_page);
 
+    let mut frame_allocator = FRAME_ALLOCATOR.lock();
+
     for page in page_range {
         let frame = frame_allocator
             .allocate_frame()
@@ -306,12 +328,14 @@ pub fn load_segment_to_memory(
             .expect("test");
         unsafe {
             mapper
-                .map_to(page, frame, flags, frame_allocator)
+                .map_to(page, frame, flags, &mut *frame_allocator)
                 .map_err(|e| e)
                 .expect("test")
                 .flush();
         }
     }
+
+    drop(frame_allocator);
 
     unsafe {
         core::ptr::copy_nonoverlapping(

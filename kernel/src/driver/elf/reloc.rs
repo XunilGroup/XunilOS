@@ -3,14 +3,6 @@ use crate::driver::elf::{
     section::{elf_get_symval, elf_section},
 };
 
-pub trait ArchRelocate {
-    fn apply_relocation(&self, rela: &Elf64Rela, base: usize, sym_value: usize) -> Result<(), i8>;
-
-    fn setup_entry(&self, entry: usize, stack_top: usize, argv: &[&str]) -> !;
-}
-
-// TODO: make ET_REL work
-
 pub unsafe fn elf_do_reloc(
     hdr: *const Elf64Ehdr,
     rel: *const Elf64Rel,

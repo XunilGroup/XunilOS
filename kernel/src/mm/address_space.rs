@@ -4,17 +4,18 @@ use x86_64::{
     structures::paging::{FrameAllocator, OffsetPageTable, PageTable, PhysFrame, Size4KiB},
 };
 
-use crate::{arch::x86_64::paging::XunilFrameAllocator, driver::syscall::memset};
+use crate::{
+    arch::{arch::FRAME_ALLOCATOR, x86_64::paging::XunilFrameAllocator},
+    driver::syscall::memset,
+};
 
 pub struct AddressSpace {
     cr3_frame: PhysFrame<Size4KiB>,
-    user_stack_top: VirtAddr,
     pub mapper: OffsetPageTable<'static>,
-    heap_base: VirtAddr,
-    heap_end: VirtAddr,
 }
 impl AddressSpace {
-    pub fn new(frame_allocator: &mut XunilFrameAllocator) -> Option<AddressSpace> {
+    pub fn new() -> Option<AddressSpace> {
+        let mut frame_allocator = FRAME_ALLOCATOR.lock();
         let new_pml4 = frame_allocator.allocate_frame()?;
 
         unsafe {
@@ -47,12 +48,11 @@ impl AddressSpace {
             )
         };
 
+        drop(frame_allocator);
+
         Some(AddressSpace {
             cr3_frame: new_pml4,
-            user_stack_top: VirtAddr::new(0x0000_7fff_0000_0000),
             mapper: mapper,
-            heap_base: VirtAddr::new(0x0),
-            heap_end: VirtAddr::new(0x0),
         })
     }
 

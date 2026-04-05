@@ -3,7 +3,7 @@ use x86_64::structures::paging::OffsetPageTable;
 
 use crate::{
     arch::{
-        arch::{run_elf, sleep},
+        arch::{FRAME_ALLOCATOR, run_elf, sleep},
         x86_64::paging::XunilFrameAllocator,
     },
     driver::{
@@ -21,11 +21,16 @@ use crate::{
         timer::TIMER,
     },
     print, println,
-    util::test_performance,
+    util::{serial_print, test_performance},
 };
 
 static CURSOR_BYTES: &[u8] = include_bytes!("../../assets/cursors/default.bmp");
-static TEST_ELF_BYTES: &[u8] = include_bytes!("../../assets/helloworld.elf");
+
+#[repr(C, align(8))]
+struct AlignedElf([u8; include_bytes!("../../assets/doomgeneric").len()]);
+static TEST_ELF: AlignedElf = AlignedElf(*include_bytes!("../../assets/doomgeneric"));
+static TEST_ELF_BYTES: &[u8] = &TEST_ELF.0;
+
 const BMP_HEADER_SIZE: usize = 138;
 pub const CURSOR_W: usize = 24;
 pub const CURSOR_H: usize = 24;
@@ -78,20 +83,17 @@ fn boot_animation() {
     });
 }
 
-pub fn userspace_init(
-    frame_allocator: &mut XunilFrameAllocator,
-    mapper: &mut OffsetPageTable,
-) -> ! {
+pub fn userspace_init(mapper: &mut OffsetPageTable) -> ! {
     // this is just a stub
 
     boot_animation();
 
-    let entry_point = load_file(frame_allocator, mapper, TEST_ELF_BYTES);
+    let (entry_point, heap_base) = load_file(mapper, TEST_ELF_BYTES);
     println!("Entry point: {:?}", entry_point);
 
     with_framebuffer(|fb| fb.swap());
 
-    run_elf(entry_point, frame_allocator);
+    run_elf(entry_point, heap_base);
 
     loop {}
 

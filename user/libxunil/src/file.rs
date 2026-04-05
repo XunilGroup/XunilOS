@@ -1,8 +1,6 @@
-use core::ptr::null_mut;
-
 #[unsafe(no_mangle)]
 extern "C" fn fopen(path: *const u8, mode: *const u8) -> *mut u8 {
-    null_mut()
+    0x10 as *mut u8
 }
 
 #[unsafe(no_mangle)]

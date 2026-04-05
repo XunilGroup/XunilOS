@@ -12,6 +12,7 @@ impl<A> Locked<A> {
         }
     }
 
+    #[allow(mismatched_lifetime_syntaxes)]
     pub fn lock(&self) -> MutexGuard<A> {
         self.inner.lock()
     }
@@ -46,5 +47,11 @@ pub const fn align_up(addr: u64, align: u64) -> u64 {
         } else {
             panic!("attempt to add with overflow")
         }
+    }
+}
+
+pub fn serial_print(s: &str) {
+    for byte in s.bytes() {
+        unsafe { core::arch::asm!("out dx, al", in("dx") 0x3F8u16, in("al") byte) }
     }
 }

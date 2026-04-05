@@ -5,6 +5,7 @@ use crate::{
         mouse::setup_mouse,
     },
     driver::mouse::MOUSE,
+    util::serial_print,
 };
 use limine::response::{HhdmResponse, MemoryMapResponse};
 use x86_64::instructions::interrupts::without_interrupts;
@@ -16,21 +17,22 @@ const PIT_DIVISOR: u16 = (1_193_182_u32 / TIMER_PRECISION_HZ) as u16;
 #[cfg(target_arch = "x86_64")]
 use crate::arch::x86_64::{
     heap::init_heap,
-    paging::{XunilFrameAllocator, initialize_paging},
+    paging::{FRAME_ALLOCATOR_X86_64, XunilFrameAllocator, initialize_paging},
 };
 #[cfg(target_arch = "x86_64")]
 use x86_64::{VirtAddr, structures::paging::OffsetPageTable};
 
 #[cfg(target_arch = "x86_64")]
-pub fn memory_management_init<'a>(
+pub fn memory_management_init(
     hhdm_response: &HhdmResponse,
-    memory_map_response: &'a MemoryMapResponse,
-) -> (OffsetPageTable<'static>, XunilFrameAllocator<'a>) {
+    memory_map_response: &MemoryMapResponse,
+) -> OffsetPageTable<'static> {
     let physical_offset = VirtAddr::new(hhdm_response.offset());
     let mapper = unsafe { initialize_paging(physical_offset) };
-    let frame_allocator =
-        XunilFrameAllocator::new(hhdm_response.offset(), memory_map_response.entries());
-    (mapper, frame_allocator)
+    let mut frame_allocator = FRAME_ALLOCATOR_X86_64.lock();
+    frame_allocator.initialize(hhdm_response.offset(), memory_map_response.entries());
+    drop(frame_allocator);
+    mapper
 }
 
 pub fn set_pit_interval() {
@@ -49,7 +51,7 @@ pub fn set_pit_interval() {
 pub fn init_x86_64<'a>(
     hhdm_response: &HhdmResponse,
     memory_map_response: &'a MemoryMapResponse,
-) -> (OffsetPageTable<'static>, XunilFrameAllocator<'a>) {
+) -> OffsetPageTable<'static> {
     load_gdt_x86_64();
     init_idt_x86_64();
 
@@ -66,14 +68,13 @@ pub fn init_x86_64<'a>(
 
     interrupts::enable();
 
-    let (mut mapper, mut frame_allocator) =
-        memory_management_init(hhdm_response, memory_map_response);
+    let mut mapper = memory_management_init(hhdm_response, memory_map_response);
 
-    init_heap(&mut mapper, &mut frame_allocator)
+    init_heap(&mut mapper)
         .ok()
         .expect("Failed to initalize heap");
 
     MOUSE.set_status(mouse_status);
 
-    return (mapper, frame_allocator);
+    return mapper;
 }

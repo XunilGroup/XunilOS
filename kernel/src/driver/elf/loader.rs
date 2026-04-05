@@ -1,45 +1,41 @@
 use core::ptr::null;
 
+use alloc::boxed::Box;
 use x86_64::structures::paging::OffsetPageTable;
 
-use crate::{
-    arch::x86_64::paging::XunilFrameAllocator,
-    driver::{
-        elf::{
-            header::{
-                ET_DYN, ET_EXEC, ET_REL, Elf64Ehdr, Elf64Rel, Elf64Shdr, SHF_ALLOC, SHT_NOBITS,
-                SHT_REL,
-            },
-            program::load_program,
-            reloc::elf_do_reloc,
-            section::elf_sheader,
-            validation::validate_elf,
+use crate::driver::{
+    elf::{
+        header::{
+            ET_DYN, ET_EXEC, ET_REL, Elf64Ehdr, Elf64Rel, Elf64Shdr, SHF_ALLOC, SHT_NOBITS, SHT_REL,
         },
-        syscall::{malloc, memset},
+        program::load_program,
+        reloc::elf_do_reloc,
+        section::elf_sheader,
+        validation::validate_elf,
     },
+    syscall::{malloc, memset},
 };
 
-pub fn load_file(
-    frame_allocator: &mut XunilFrameAllocator,
-    mapper: &mut OffsetPageTable,
-    elf_bytes: &[u8],
-) -> *const u8 {
+pub fn load_file(mapper: &mut OffsetPageTable, elf_bytes: &[u8]) -> (*const u8, u64) {
     // elf header size
     if elf_bytes.len() < 64 {
-        return null();
+        return (null(), 0);
     }
 
-    let elf_header: &Elf64Ehdr = unsafe { &*(elf_bytes.as_ptr() as *const Elf64Ehdr) };
+    let elf_header: Elf64Ehdr =
+        unsafe { core::ptr::read_unaligned(elf_bytes.as_ptr() as *const Elf64Ehdr) };
 
-    if !validate_elf(elf_header, elf_bytes.len()) {
-        return null();
+    if !validate_elf(&elf_header, elf_bytes.len()) {
+        return (null(), 0);
     }
 
-    return match elf_header.e_type {
-        ET_EXEC => unsafe { load_program(frame_allocator, mapper, elf_header, elf_bytes, false) },
-        ET_DYN => unsafe { load_program(frame_allocator, mapper, elf_header, elf_bytes, true) }, // TODO
-        ET_REL => return null(),
-        _ => return null(),
+    let elf_header_ptr = elf_bytes.as_ptr() as *const Elf64Ehdr;
+
+    return match unsafe { elf_header.e_type } {
+        ET_EXEC => unsafe { load_program(mapper, elf_header_ptr, elf_bytes, false) },
+        ET_DYN => unsafe { load_program(mapper, elf_header_ptr, elf_bytes, true) },
+        ET_REL => return (null(), 0),
+        _ => return (null(), 0),
     };
 }
 
@@ -69,7 +65,7 @@ pub unsafe fn elf_load_stage1(hdr: *const Elf64Ehdr) {
                     // zero the memory
                     memset(mem, 0, section.sh_size as usize);
                 }
-                section.sh_offset = (mem.addr() + hdr.addr()) as u64;
+                section.sh_offset = mem.addr() as u64;
             }
         }
 

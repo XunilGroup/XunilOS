@@ -11,6 +11,9 @@ pub struct Process {
     pub pid: u64,
     pub state: ProcessState,
     // cpu_ctx: &[u8],
+    pub stack_top: u64,
+    pub heap_base: u64,
+    pub heap_end: u64,
     pub address_space: AddressSpace,
     pub user_entry: u64,
 }
@@ -18,13 +21,18 @@ impl Process {
     pub fn new(
         pid: u64,
         user_entry: u64,
-        frame_allocator: &mut XunilFrameAllocator,
+        stack_top: u64,
+        heap_base: u64,
+        heap_end: u64,
     ) -> Option<Process> {
-        let address_space = AddressSpace::new(frame_allocator)?;
+        let address_space = AddressSpace::new()?;
 
         Some(Process {
             pid,
+            stack_top,
             state: ProcessState::Ready,
+            heap_base,
+            heap_end,
             address_space,
             user_entry,
         })

@@ -11,8 +11,8 @@ crate-type = ["staticlib"]
 panic = "abort"
 opt-level = "s"
 
-[target.'cfg(target_arch = "x86_64")'.dependencies]
-x86_64 = "0.15.4"
+[dependencies]
+spin = "0.10.0"
 
 [profile.dev]
 panic = "abort"

@@ -24,6 +24,7 @@ use crate::driver::graphics::framebuffer::{init_framebuffer, with_framebuffer};
 use crate::driver::serial::{ConsoleWriter, init_serial_console, with_serial_console};
 use crate::driver::timer::TIMER;
 use crate::userspace_stub::userspace_init;
+use crate::util::serial_print;
 /// Sets the base revision to the latest revision supported by the crate.
 /// See specification for further info.
 /// Be sure to mark all limine requests with #[used], otherwise they may be removed by the compiler.
@@ -98,11 +99,10 @@ unsafe extern "C" fn kmain() -> ! {
     assert!(BASE_REVISION.is_supported());
 
     let mut mapper;
-    let mut frame_allocator;
 
     if let Some(hhdm_response) = HHDM_REQUEST.get_response() {
         if let Some(memory_map_response) = MEMORY_MAP_REQUEST.get_response() {
-            (mapper, frame_allocator) = init(hhdm_response, memory_map_response);
+            mapper = init(hhdm_response, memory_map_response);
         } else {
             kernel_crash(); // Could not get required info from Limine's memory map.
         }
@@ -124,7 +124,7 @@ unsafe extern "C" fn kmain() -> ! {
         println!("Could not get date at boot. Will default to 0.")
     }
 
-    userspace_init(&mut frame_allocator, &mut mapper)
+    userspace_init(&mut mapper)
 }
 
 #[panic_handler]

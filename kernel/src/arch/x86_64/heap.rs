@@ -1,5 +1,5 @@
-use crate::arch::x86_64::paging::XunilFrameAllocator;
-use crate::util::Locked;
+use crate::arch::x86_64::paging::{FRAME_ALLOCATOR_X86_64, XunilFrameAllocator};
+use crate::util::{Locked, serial_print};
 use core::{
     alloc::{GlobalAlloc, Layout},
     ptr::null_mut,
@@ -138,6 +138,9 @@ unsafe impl GlobalAlloc for Locked<LinkedListAllocator> {
                     allocator.add_free_memory_region(alloc_end, excess_size);
                 }
             }
+
+            drop(allocator);
+
             alloc_start as *mut u8
         } else {
             null_mut()
@@ -153,10 +156,7 @@ unsafe impl GlobalAlloc for Locked<LinkedListAllocator> {
     }
 }
 
-pub fn init_heap(
-    mapper: &mut OffsetPageTable,
-    frame_allocator: &mut XunilFrameAllocator,
-) -> Result<(), MapToError<Size4KiB>> {
+pub fn init_heap(mapper: &mut OffsetPageTable) -> Result<(), MapToError<Size4KiB>> {
     let page_range = {
         let page_start = VirtAddr::new(HEAP_START as u64);
         let page_end = page_start + HEAP_SIZE as u64 - 1u64;
@@ -165,6 +165,8 @@ pub fn init_heap(
         Page::range_inclusive(heap_start_page, heap_end_page)
     };
 
+    let mut frame_allocator = FRAME_ALLOCATOR_X86_64.lock();
+
     for page in page_range {
         let frame = frame_allocator
             .allocate_frame()
@@ -172,11 +174,13 @@ pub fn init_heap(
         let flags = Flags::PRESENT | Flags::WRITABLE;
         unsafe {
             mapper
-                .map_to(page, frame, flags, frame_allocator)
+                .map_to(page, frame, flags, &mut *frame_allocator)
                 .map_err(|e| e)?
                 .flush();
         }
     }
+
+    drop(frame_allocator);
 
     unsafe {
         ALLOCATOR.lock().init(HEAP_START, HEAP_SIZE);

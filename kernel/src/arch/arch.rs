@@ -1,12 +1,16 @@
-use crate::driver::timer::TIMER;
 #[cfg(target_arch = "x86_64")]
-use core::alloc::GlobalAlloc;
-use core::arch::asm;
+pub use crate::arch::x86_64::paging::FRAME_ALLOCATOR_X86_64 as FRAME_ALLOCATOR;
+
+use crate::driver::timer::TIMER;
+use core::{alloc::GlobalAlloc, arch::asm};
 use limine::response::{HhdmResponse, MemoryMapResponse};
 
 #[cfg(target_arch = "x86_64")]
 use crate::arch::x86_64::{
-    elf::run_elf_x86_64, heap::ALLOCATOR, init::init_x86_64, paging::XunilFrameAllocator,
+    elf::run_elf_x86_64,
+    heap::ALLOCATOR,
+    init::init_x86_64,
+    paging::{FRAME_ALLOCATOR_X86_64, XunilFrameAllocator},
     usermode::enter_usermode_x86_64,
 };
 #[cfg(target_arch = "x86_64")]
@@ -16,7 +20,7 @@ use x86_64::structures::paging::OffsetPageTable;
 pub fn init<'a>(
     hhdm_response: &HhdmResponse,
     memory_map_response: &'a MemoryMapResponse,
-) -> (OffsetPageTable<'static>, XunilFrameAllocator<'a>) {
+) -> (OffsetPageTable<'static>) {
     return init_x86_64(hhdm_response, memory_map_response);
 }
 
@@ -26,8 +30,8 @@ pub fn enter_usermode(user_rip: u64, user_rsp: u64) {
 }
 
 #[cfg(target_arch = "x86_64")]
-pub fn run_elf(entry_point: *const u8, frame_allocator: &mut XunilFrameAllocator) {
-    run_elf_x86_64(entry_point, frame_allocator);
+pub fn run_elf(entry_point: *const u8, heap_base: u64) {
+    run_elf_x86_64(entry_point, heap_base);
 }
 
 pub fn get_allocator<'a>() -> &'static impl GlobalAlloc {
