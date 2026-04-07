@@ -26,7 +26,7 @@ use crate::{
 
 static CURSOR_BYTES: &[u8] = include_bytes!("../../assets/cursors/default.bmp");
 
-#[repr(C, align(8))]
+#[repr(C, align(16))]
 struct AlignedElf([u8; include_bytes!("../../assets/doomgeneric").len()]);
 static TEST_ELF: AlignedElf = AlignedElf(*include_bytes!("../../assets/doomgeneric"));
 static TEST_ELF_BYTES: &[u8] = &TEST_ELF.0;
@@ -85,8 +85,6 @@ fn boot_animation() {
 
 pub fn userspace_init(mapper: &mut OffsetPageTable) -> ! {
     // this is just a stub
-
-    boot_animation();
 
     let (entry_point, heap_base) = load_file(mapper, TEST_ELF_BYTES);
     println!("Entry point: {:?}", entry_point);

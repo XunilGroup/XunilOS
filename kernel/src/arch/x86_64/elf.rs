@@ -16,7 +16,7 @@ use crate::{
 
 pub fn run_elf_x86_64(entry_point: *const u8, heap_base: u64) {
     let stack_base: u64 = 0x0000_7fff_0000_0000;
-    let page_count = 3;
+    let page_count = 4096; // 16 mib
     let page_size = 0x1000u64;
     let stack_top = stack_base + (page_count as u64 * page_size);
 

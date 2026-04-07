@@ -291,27 +291,26 @@ pub fn load_segment_to_memory(
     let p_offset: u64 = unsafe { (*phdr).p_offset };
     let file_size: u64 = unsafe { (*phdr).p_filesz };
 
-    let vaddr: *mut u8 = get_vaddr(phdr, load_bias);
-
     if p_offset > elf_bytes.len() as u64
         || file_size > elf_bytes.len() as u64
         || p_offset + file_size > elf_bytes.len() as u64
+        || file_size > mem_size
     {
         return;
     } // invalid, could read past it's memory
 
-    if file_size > mem_size {
-        return;
-    }
+    let vaddr: u64 = get_vaddr(phdr, load_bias) as u64;
+    let mem_page: u64 = align_down(vaddr, PAGE_SIZE);
+    let file_page: u64 = align_down(p_offset, PAGE_SIZE);
+    let page_off: u64 = vaddr - mem_page;
 
-    let seg_start = align_down(vaddr as u64, PAGE_SIZE);
-    let seg_end = align_up(vaddr as u64 + mem_size, PAGE_SIZE);
+    let seg_start = mem_page;
+    let seg_end = align_up(vaddr + mem_size, PAGE_SIZE);
 
     let mut flags =
         PageTableFlags::PRESENT | PageTableFlags::USER_ACCESSIBLE | PageTableFlags::WRITABLE;
 
-    if unsafe { ((*phdr).p_flags & PF_X) != 0 } {
-    } else {
+    if unsafe { ((*phdr).p_flags & PF_X) == 0 } {
         flags |= PageTableFlags::NO_EXECUTE;
     }
 
@@ -337,19 +336,18 @@ pub fn load_segment_to_memory(
 
     drop(frame_allocator);
 
+    let dst = (mem_page + page_off) as *mut u8;
+    let src = unsafe { elf_bytes.as_ptr().add(p_offset as usize) };
+
     unsafe {
-        core::ptr::copy_nonoverlapping(
-            elf_bytes.as_ptr().add(p_offset as usize),
-            vaddr,
-            file_size as usize,
-        );
+        core::ptr::copy_nonoverlapping(src, dst, file_size as usize);
 
         if mem_size > file_size {
             memset(
-                vaddr.add(file_size as usize),
+                dst.add(file_size as usize),
                 0,
                 (mem_size - file_size) as usize,
             );
         }
-    };
+    }
 }

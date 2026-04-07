@@ -70,6 +70,22 @@ impl Framebuffer {
         }
     }
 
+    pub unsafe fn load_from_ptr(
+        &mut self,
+        src_ptr: *const u32,
+        src_width: usize,
+        src_height: usize,
+    ) {
+        let h = core::cmp::min(src_height, self.height);
+        let w = core::cmp::min(src_width, self.width);
+
+        for y in 0..h {
+            let src_row = src_ptr.add(y * src_width);
+            let dst_row = self.back_buffer.as_mut_ptr().add(y * self.pitch);
+            core::ptr::copy_nonoverlapping(src_row, dst_row, w);
+        }
+    }
+
     pub fn clear(&mut self, color: u32) {
         self.back_buffer.fill(color);
     }

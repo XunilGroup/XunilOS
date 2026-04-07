@@ -19,6 +19,10 @@ pub const UNLINK: usize = 87;
 pub const GETDENTS64: usize = 217;
 pub const CLOCK_GETTIME: usize = 228;
 pub const EXIT_GROUP: usize = 231;
+pub const SLEEP: usize = 909090; // zzz haha
+pub const DRAW_PIXEL: usize = 5555;
+pub const DRAW_BUFFER: usize = 7777;
+pub const FRAMEBUFFER_SWAP: usize = 6666;
 
 #[inline(always)]
 pub unsafe fn syscall0(num: usize) -> isize {
@@ -28,6 +32,8 @@ pub unsafe fn syscall0(num: usize) -> isize {
             "int 0x80",
             in("rax") num,
             lateout("rax") ret,
+            out("rdi") _, out("rcx") _, out("rdx") _, out("rsi") _,
+            out("r8") _, out("r9") _, out("r10") _, out("r11") _,
             options(nostack)
         );
     }
@@ -36,7 +42,7 @@ pub unsafe fn syscall0(num: usize) -> isize {
 }
 
 #[inline(always)]
-pub unsafe fn syscall1(num: usize, arg0: usize) -> isize {
+pub unsafe fn syscall1(num: usize, arg0: isize) -> isize {
     let ret: isize;
     unsafe {
         core::arch::asm!(
@@ -44,6 +50,8 @@ pub unsafe fn syscall1(num: usize, arg0: usize) -> isize {
             in("rax") num,
             in("rdi") arg0,
             lateout("rax") ret,
+            out("rcx") _, out("rdx") _, out("rsi") _,
+            out("r8") _, out("r9") _, out("r10") _, out("r11") _,
             options(nostack)
         );
     }
@@ -52,7 +60,7 @@ pub unsafe fn syscall1(num: usize, arg0: usize) -> isize {
 }
 
 #[inline(always)]
-pub unsafe fn syscall3(num: usize, arg0: usize, arg1: usize, arg2: usize) -> isize {
+pub unsafe fn syscall3(num: usize, arg0: isize, arg1: isize, arg2: isize) -> isize {
     let ret: isize;
     unsafe {
         core::arch::asm!(

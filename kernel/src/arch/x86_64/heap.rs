@@ -20,7 +20,7 @@ fn align_up(addr: usize, align: usize) -> usize {
 pub static ALLOCATOR: Locked<LinkedListAllocator> = Locked::new(LinkedListAllocator::new());
 
 pub const HEAP_START: usize = 0x_4444_4444_0000;
-pub const HEAP_SIZE: usize = 256 * 1024 * 1024; // 256 MiB
+pub const HEAP_SIZE: usize = 64 * 1024 * 1024; // 64 MiB
 
 pub struct LinkedNode {
     pub size: usize,
@@ -54,7 +54,7 @@ impl LinkedListAllocator {
 
     fn size_align(layout: Layout) -> (usize, usize) {
         let layout = layout
-            .align_to(core::mem::align_of::<LinkedNode>())
+            .align_to(16)
             .expect("Align to LinkedNode failed")
             .pad_to_align();
 
@@ -70,7 +70,7 @@ impl LinkedListAllocator {
     }
 
     unsafe fn add_free_memory_region(&mut self, start: usize, size: usize) {
-        assert_eq!(align_up(start, core::mem::align_of::<LinkedNode>()), start); // Check if we are up at least 1 LinkedNode size
+        assert_eq!(align_up(start, 16), start); // Check if we are up at least 1 LinkedNode size
         assert!(size >= core::mem::size_of::<LinkedNode>()); // check if we have enough space for a LinkedNode
 
         let mut linked_node = LinkedNode::new(size);

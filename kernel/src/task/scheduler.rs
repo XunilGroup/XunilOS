@@ -39,6 +39,8 @@ impl Locked<Scheduler> {
         let stack_top = guard.processes[&pid].stack_top;
         guard.current_process = pid as i64;
 
+        drop(guard);
+
         enter_usermode(entry_point as u64, (stack_top & !0xF) - 8);
     }
 

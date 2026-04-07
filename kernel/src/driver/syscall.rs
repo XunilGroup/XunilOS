@@ -3,15 +3,19 @@ use core::{
     ptr::null_mut,
 };
 
+use alloc::string::ToString;
 use x86_64::{
     VirtAddr,
     structures::paging::{FrameAllocator, Mapper, Page, PageTableFlags, Size4KiB},
 };
 
 use crate::{
-    arch::arch::{FRAME_ALLOCATOR, get_allocator, infinite_idle},
-    driver::graphics::framebuffer::with_framebuffer,
-    println,
+    arch::arch::{FRAME_ALLOCATOR, get_allocator, infinite_idle, sleep},
+    driver::{
+        graphics::{framebuffer::with_framebuffer, primitives::rectangle_filled},
+        timer::TIMER,
+    },
+    print, println,
     task::scheduler::SCHEDULER,
     util::{align_up, serial_print},
 };
@@ -37,6 +41,10 @@ const UNLINK: usize = 87;
 const GETDENTS64: usize = 217;
 const CLOCK_GETTIME: usize = 228;
 const EXIT_GROUP: usize = 231;
+const SLEEP: usize = 909090; // zzz haha
+const DRAW_PIXEL: usize = 5555;
+const FRAMEBUFFER_SWAP: usize = 6666;
+pub const DRAW_BUFFER: usize = 7777;
 
 pub unsafe fn malloc(size: usize, align: usize) -> *mut u8 {
     let align = if align < 1 {
@@ -74,7 +82,6 @@ pub unsafe fn memset(ptr: *mut u8, val: u8, count: usize) {
 }
 
 pub unsafe fn sbrk(increment: isize) -> isize {
-    serial_print("sbrk called");
     let mut scheduler = SCHEDULER.lock();
     if scheduler.current_process == -1 {
         return -1;
@@ -100,42 +107,46 @@ pub unsafe fn sbrk(increment: isize) -> isize {
             if new < heap_base {
                 return -1;
             }
-            if new > stack_top - 3 * 4096 {
+            if new > stack_top - 16384 * 4096 {
+                // 67 mib max
                 return -1;
             }
+
             if new > old {
                 let map_start = align_up(old, 4096);
                 let map_end = align_up(new, 4096);
 
                 for addr in (map_start..map_end).step_by(4096) {
-                    let frame = frame_allocator.allocate_frame().unwrap();
+                    if let Some(frame) = frame_allocator.allocate_frame() {
+                        // TODO: do not use x86_64 only
+                        let virt_addr = VirtAddr::new(addr);
+                        let page = Page::<Size4KiB>::containing_address(virt_addr);
+                        unsafe {
+                            process
+                                .address_space
+                                .mapper
+                                .map_to(
+                                    page,
+                                    frame,
+                                    PageTableFlags::PRESENT
+                                        | PageTableFlags::WRITABLE
+                                        | PageTableFlags::USER_ACCESSIBLE
+                                        | PageTableFlags::NO_EXECUTE,
+                                    &mut *frame_allocator,
+                                )
+                                .unwrap()
+                                .flush();
 
-                    // TODO: do not use x86_64 only
-                    let virt_addr = VirtAddr::new(addr);
-                    let page = Page::<Size4KiB>::containing_address(virt_addr);
-                    unsafe {
-                        process
-                            .address_space
-                            .mapper
-                            .map_to(
-                                page,
-                                frame,
-                                PageTableFlags::PRESENT
-                                    | PageTableFlags::WRITABLE
-                                    | PageTableFlags::USER_ACCESSIBLE
-                                    | PageTableFlags::NO_EXECUTE,
-                                &mut *frame_allocator,
-                            )
-                            .unwrap()
-                            .flush();
+                            core::ptr::write_bytes(virt_addr.as_mut_ptr::<u8>(), 0, 4096);
+                        }
+                    } else {
+                        return -1;
                     }
                 }
             }
             drop(frame_allocator);
 
             process.heap_end = new;
-
-            serial_print("sbrk finished");
 
             return old as isize;
         })
@@ -150,20 +161,57 @@ pub unsafe extern "C" fn syscall_dispatch(
     arg2: isize,
 ) -> isize {
     match num {
-        SYS_BRK => sbrk(arg0),
-        SYS_WRITE => {
+        BRK => sbrk(arg0),
+        WRITE => {
             let buf_ptr = arg1 as *const u8;
             let len = arg2 as usize;
             let bytes: &[u8] = unsafe { core::slice::from_raw_parts(buf_ptr, len) };
-            let s = core::str::from_utf8(bytes).unwrap_or("<non-utf8>");
-            println!("SYS_WRITE called: {:?} {:?}", s, len);
+            if let Ok(s) = core::str::from_utf8(bytes) {
+                print!("{}", s);
+            } else {
+                for byte in bytes {
+                    if *byte == b'\0' {
+                        continue;
+                    }
+                    print!("{}", *byte as char);
+                }
+            }
+
             with_framebuffer(|fb| fb.swap());
             0
         }
-        SYS_EXIT => {
-            println!("Program exit.");
+        EXIT => {
+            println!("Program exit: {}", arg0);
             with_framebuffer(|fb| fb.swap());
             infinite_idle();
+        }
+        67 => {
+            println!("{:?}", arg1);
+            0
+        }
+        SLEEP => {
+            sleep(arg0 as u64);
+            0
+        }
+        CLOCK_GETTIME => TIMER.now().elapsed() as isize,
+        DRAW_PIXEL => {
+            with_framebuffer(|mut fb| {
+                rectangle_filled(&mut fb, arg0 as usize, arg1 as usize, 4, 4, arg2 as u32);
+            });
+            0
+        }
+        DRAW_BUFFER => {
+            with_framebuffer(|mut fb| {
+                fb.load_from_ptr(arg0 as *const u32, arg1 as usize, arg2 as usize);
+                fb.swap();
+            });
+            0
+        }
+        FRAMEBUFFER_SWAP => {
+            with_framebuffer(|fb| {
+                fb.swap();
+            });
+            0
         }
         _ => -38, // syscall not found
     }

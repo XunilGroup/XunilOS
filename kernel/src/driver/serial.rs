@@ -1,6 +1,6 @@
-use crate::driver::graphics::base::rgb;
 use crate::driver::graphics::font_render::render_text;
 use crate::driver::graphics::framebuffer::Framebuffer;
+use crate::{driver::graphics::base::rgb, util::serial_print};
 use core::fmt::{self, Write};
 use spin::Mutex;
 
@@ -15,6 +15,7 @@ pub struct ConsoleWriter<'a> {
 
 impl Write for ConsoleWriter<'_> {
     fn write_str(&mut self, s: &str) -> fmt::Result {
+        serial_print(s);
         self.console.render_text(self.fb, s, 2, false);
         Ok(())
     }

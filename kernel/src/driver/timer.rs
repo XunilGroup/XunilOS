@@ -3,6 +3,8 @@ use core::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
+use crate::util::serial_print;
+
 pub static TIMER: Timer = Timer::new();
 
 pub struct Timer {
@@ -49,6 +51,11 @@ impl Time {
 
     pub fn elapsed(&self) -> u64 {
         self.interrupt_count
+    }
+
+    pub fn ticks_since(&self) -> u64 {
+        let now = TIMER.interrupt_count.load(Ordering::Relaxed);
+        now.saturating_sub(self.interrupt_count)
     }
 }
 

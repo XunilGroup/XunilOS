@@ -8,8 +8,14 @@ use crate::{
     util::serial_print,
 };
 use limine::response::{HhdmResponse, MemoryMapResponse};
-use x86_64::instructions::interrupts::without_interrupts;
-use x86_64::instructions::{interrupts, port::Port};
+use x86_64::{
+    instructions::interrupts::without_interrupts,
+    registers::control::{Cr0, Cr0Flags},
+};
+use x86_64::{
+    instructions::{interrupts, port::Port},
+    registers::control::{Cr4, Cr4Flags},
+};
 
 const TIMER_PRECISION_HZ: u32 = 1000;
 const PIT_DIVISOR: u16 = (1_193_182_u32 / TIMER_PRECISION_HZ) as u16;
@@ -53,6 +59,19 @@ pub fn init_x86_64<'a>(
     memory_map_response: &'a MemoryMapResponse,
 ) -> OffsetPageTable<'static> {
     load_gdt_x86_64();
+
+    unsafe {
+        let mut cr0 = Cr0::read();
+        cr0.remove(Cr0Flags::EMULATE_COPROCESSOR);
+        cr0.insert(Cr0Flags::MONITOR_COPROCESSOR);
+        Cr0::write(cr0);
+
+        let mut cr4 = Cr4::read();
+        cr4.insert(Cr4Flags::OSFXSR);
+        cr4.insert(Cr4Flags::OSXMMEXCPT_ENABLE);
+        Cr4::write(cr4);
+    }
+
     init_idt_x86_64();
 
     unsafe {

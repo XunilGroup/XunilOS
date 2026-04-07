@@ -6,6 +6,7 @@ use crate::{
         timer::TIMER,
     },
     println,
+    util::serial_print,
 };
 use lazy_static::lazy_static;
 use pc_keyboard::DecodedKey;
@@ -182,11 +183,11 @@ unsafe extern "C" fn syscall_interrupt_handler() {
         "add rsp, 8",
         "add rsp, 8",
         // pop them in reverse orser
-        "pop rbx",
-        "pop rcx",
-        "pop rdx",
-        "pop rsi",
         "pop rdi",
+        "pop rsi",
+        "pop rdx",
+        "pop rcx",
+        "pop rbx",
         "pop rbp",
         "pop r8",
         "pop r9",

@@ -1,8 +1,9 @@
 #[cfg(target_arch = "x86_64")]
 pub use crate::arch::x86_64::paging::FRAME_ALLOCATOR_X86_64 as FRAME_ALLOCATOR;
 
-use crate::driver::timer::TIMER;
-use core::{alloc::GlobalAlloc, arch::asm};
+use crate::{driver::timer::TIMER, util::serial_print};
+use alloc::string::ToString;
+use core::{alloc::GlobalAlloc, arch::asm, sync::atomic::Ordering};
 use limine::response::{HhdmResponse, MemoryMapResponse};
 
 #[cfg(target_arch = "x86_64")]
@@ -50,10 +51,11 @@ pub fn idle() {
 }
 
 pub fn sleep(ticks: u64) {
-    let start = TIMER.now();
-    while (TIMER.now() - start).elapsed() <= ticks {
-        idle();
-    }
+    // let start = TIMER.now();
+    // while start.ticks_since() < ticks {
+    //     serial_print(start.ticks_since().to_string().as_str());
+    //     core::hint::spin_loop();
+    // }
 }
 
 pub fn infinite_idle() -> ! {
