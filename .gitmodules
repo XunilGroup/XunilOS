@@ -3,4 +3,4 @@
 	url = git@github.com:xunilGroup/doomgeneric-xunil.git
 [submodule "user/libxunil"]
 	path = user/libxunil
-	url = git@github.com:XunilGroup/libxunil.git
+	url = https://github.com/XunilGroup/libxunil.git
