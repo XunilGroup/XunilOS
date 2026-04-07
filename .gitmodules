@@ -1,3 +1,6 @@
 [submodule "user/apps/doomgeneric"]
 	path = user/apps/doomgeneric
 	url = git@github.com:xunilGroup/doomgeneric-xunil.git
+[submodule "user/libxunil"]
+	path = user/libxunil
+	url = git@github.com:XunilGroup/libxunil.git
