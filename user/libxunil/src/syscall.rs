@@ -32,8 +32,7 @@ pub unsafe fn syscall0(num: usize) -> isize {
             "int 0x80",
             in("rax") num,
             lateout("rax") ret,
-            out("rdi") _, out("rcx") _, out("rdx") _, out("rsi") _,
-            out("r8") _, out("r9") _, out("r10") _, out("r11") _,
+            clobber_abi("sysv64"),
             options(nostack)
         );
     }
@@ -50,8 +49,7 @@ pub unsafe fn syscall1(num: usize, arg0: isize) -> isize {
             in("rax") num,
             in("rdi") arg0,
             lateout("rax") ret,
-            out("rcx") _, out("rdx") _, out("rsi") _,
-            out("r8") _, out("r9") _, out("r10") _, out("r11") _,
+            clobber_abi("sysv64"),
             options(nostack)
         );
     }
@@ -70,6 +68,7 @@ pub unsafe fn syscall3(num: usize, arg0: isize, arg1: isize, arg2: isize) -> isi
             in("rsi") arg1,
             in("rdx") arg2,
             lateout("rax") ret,
+            clobber_abi("sysv64"),
             options(nostack)
         );
     }

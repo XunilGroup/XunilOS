@@ -539,7 +539,7 @@ unsafe extern "C" fn strdup(s: *const u8) -> *mut u8 {
     if memory.is_null() {
         return null_mut();
     }
-    memcpy(memory, s, len + 1);
+    unsafe { memcpy(memory, s, len + 1) };
     memory
 }
 
