@@ -1,6 +1,6 @@
-#include "../src/stdio.h"
+#include "../../libxunil/include/stdio.h"
 
-void _start() {
-   write(0, "Hello, World!", 13);
+int main(int argc, char **argv) {
+   printf("%s\n", "Hello, world!");
    exit(0);
 }

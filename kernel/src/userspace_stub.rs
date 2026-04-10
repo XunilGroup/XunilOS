@@ -2,10 +2,7 @@ use alloc::string::ToString;
 use x86_64::structures::paging::OffsetPageTable;
 
 use crate::{
-    arch::{
-        arch::{FRAME_ALLOCATOR, run_elf, sleep},
-        x86_64::paging::XunilFrameAllocator,
-    },
+    arch::arch::{run_elf, sleep},
     driver::{
         elf::loader::load_file,
         graphics::{

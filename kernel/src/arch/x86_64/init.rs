@@ -5,7 +5,6 @@ use crate::{
         mouse::setup_mouse,
     },
     driver::mouse::MOUSE,
-    util::serial_print,
 };
 use limine::response::{HhdmResponse, MemoryMapResponse};
 use x86_64::{
@@ -23,7 +22,7 @@ const PIT_DIVISOR: u16 = (1_193_182_u32 / TIMER_PRECISION_HZ) as u16;
 #[cfg(target_arch = "x86_64")]
 use crate::arch::x86_64::{
     heap::init_heap,
-    paging::{FRAME_ALLOCATOR_X86_64, XunilFrameAllocator, initialize_paging},
+    paging::{FRAME_ALLOCATOR_X86_64, initialize_paging},
 };
 #[cfg(target_arch = "x86_64")]
 use x86_64::{VirtAddr, structures::paging::OffsetPageTable};
@@ -61,6 +60,7 @@ pub fn init_x86_64<'a>(
     load_gdt_x86_64();
 
     unsafe {
+        // setup SSE (SIMD = Single Instruction, Multiple Data)
         let mut cr0 = Cr0::read();
         cr0.remove(Cr0Flags::EMULATE_COPROCESSOR);
         cr0.insert(Cr0Flags::MONITOR_COPROCESSOR);

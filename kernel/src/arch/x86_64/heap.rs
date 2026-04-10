@@ -1,5 +1,5 @@
-use crate::arch::x86_64::paging::{FRAME_ALLOCATOR_X86_64, XunilFrameAllocator};
-use crate::util::{Locked, serial_print};
+use crate::arch::x86_64::paging::FRAME_ALLOCATOR_X86_64;
+use crate::util::Locked;
 use core::{
     alloc::{GlobalAlloc, Layout},
     ptr::null_mut,

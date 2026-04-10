@@ -2,7 +2,6 @@
 #![no_main]
 #![feature(abi_x86_interrupt)]
 #![feature(str_from_raw_parts)]
-#![allow(warnings)]
 extern crate alloc;
 use core::fmt::Write;
 
@@ -24,7 +23,6 @@ use crate::driver::graphics::framebuffer::{init_framebuffer, with_framebuffer};
 use crate::driver::serial::{ConsoleWriter, init_serial_console, with_serial_console};
 use crate::driver::timer::TIMER;
 use crate::userspace_stub::userspace_init;
-use crate::util::serial_print;
 /// Sets the base revision to the latest revision supported by the crate.
 /// See specification for further info.
 /// Be sure to mark all limine requests with #[used], otherwise they may be removed by the compiler.

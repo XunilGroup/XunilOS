@@ -1,18 +1,10 @@
 use alloc::vec::Vec;
 use x86_64::{
     VirtAddr,
-    structures::paging::{
-        FrameAllocator, Mapper, OffsetPageTable, Page, PageTableFlags, PhysFrame, Size4KiB,
-    },
+    structures::paging::{FrameAllocator, Mapper, Page, PageTableFlags, PhysFrame, Size4KiB},
 };
 
-use crate::{
-    arch::{
-        arch::FRAME_ALLOCATOR,
-        x86_64::{paging::XunilFrameAllocator, usermode::enter_usermode_x86_64},
-    },
-    task::{process::Process, scheduler::SCHEDULER},
-};
+use crate::{arch::arch::FRAME_ALLOCATOR, task::scheduler::SCHEDULER};
 
 pub fn run_elf_x86_64(entry_point: *const u8, heap_base: u64) {
     let stack_base: u64 = 0x0000_7fff_0000_0000;

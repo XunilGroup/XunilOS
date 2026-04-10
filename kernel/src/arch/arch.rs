@@ -1,18 +1,13 @@
 #[cfg(target_arch = "x86_64")]
 pub use crate::arch::x86_64::paging::FRAME_ALLOCATOR_X86_64 as FRAME_ALLOCATOR;
 
-use crate::{driver::timer::TIMER, util::serial_print};
-use alloc::string::ToString;
-use core::{alloc::GlobalAlloc, arch::asm, sync::atomic::Ordering};
+use crate::driver::timer::TIMER;
+use core::{alloc::GlobalAlloc, arch::asm};
 use limine::response::{HhdmResponse, MemoryMapResponse};
 
 #[cfg(target_arch = "x86_64")]
 use crate::arch::x86_64::{
-    elf::run_elf_x86_64,
-    heap::ALLOCATOR,
-    init::init_x86_64,
-    paging::{FRAME_ALLOCATOR_X86_64, XunilFrameAllocator},
-    usermode::enter_usermode_x86_64,
+    elf::run_elf_x86_64, heap::ALLOCATOR, init::init_x86_64, usermode::enter_usermode_x86_64,
 };
 #[cfg(target_arch = "x86_64")]
 use x86_64::structures::paging::OffsetPageTable;
@@ -21,7 +16,7 @@ use x86_64::structures::paging::OffsetPageTable;
 pub fn init<'a>(
     hhdm_response: &HhdmResponse,
     memory_map_response: &'a MemoryMapResponse,
-) -> (OffsetPageTable<'static>) {
+) -> OffsetPageTable<'static> {
     return init_x86_64(hhdm_response, memory_map_response);
 }
 
@@ -51,11 +46,10 @@ pub fn idle() {
 }
 
 pub fn sleep(ticks: u64) {
-    // let start = TIMER.now();
-    // while start.ticks_since() < ticks {
-    //     serial_print(start.ticks_since().to_string().as_str());
-    //     core::hint::spin_loop();
-    // }
+    let start = TIMER.now();
+    while start.ticks_since() < ticks {
+        idle();
+    }
 }
 
 pub fn infinite_idle() -> ! {

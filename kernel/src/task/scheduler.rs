@@ -1,11 +1,7 @@
 use alloc::collections::btree_map::BTreeMap;
-use lazy_static::lazy_static;
+use x86_64::instructions::interrupts::without_interrupts;
 
-use crate::{
-    arch::{arch::enter_usermode, x86_64::paging::XunilFrameAllocator},
-    task::process::Process,
-    util::Locked,
-};
+use crate::{arch::arch::enter_usermode, task::process::Process, util::Locked};
 
 pub struct Scheduler {
     pub processes: BTreeMap<u64, Process>,
@@ -25,7 +21,7 @@ impl Scheduler {
 
 impl Locked<Scheduler> {
     pub fn spawn_process(&self, entry_point: u64, stack_top: u64, heap_base: u64) -> Option<u64> {
-        let mut guard = self.lock();
+        let mut guard = without_interrupts(|| self.lock());
         let pid = guard.next_pid;
         guard.next_pid += 1;
         let process = Process::new(pid, entry_point, stack_top, heap_base, heap_base)?;
@@ -35,7 +31,7 @@ impl Locked<Scheduler> {
     }
 
     pub fn run_process(&self, pid: u64, entry_point: *const u8) {
-        let mut guard = self.lock();
+        let mut guard = without_interrupts(|| self.lock());
         let stack_top = guard.processes[&pid].stack_top;
         guard.current_process = pid as i64;
 
@@ -48,7 +44,7 @@ impl Locked<Scheduler> {
     where
         F: FnOnce(&mut Process) -> R,
     {
-        let mut guard = self.lock();
+        let mut guard = without_interrupts(|| self.lock());
         let process = guard.processes.get_mut(&index)?;
         Some(f(process))
     }

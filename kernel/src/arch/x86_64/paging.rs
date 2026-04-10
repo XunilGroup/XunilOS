@@ -1,4 +1,3 @@
-use alloc::string::ToString;
 use spin::mutex::Mutex;
 use x86_64::{
     PhysAddr, VirtAddr,
@@ -8,7 +7,7 @@ use x86_64::{
 
 use limine::memory_map::{Entry, EntryType};
 
-use crate::util::{align_up, serial_print};
+use crate::util::align_up;
 
 unsafe fn active_level_4_table(mem_offset: VirtAddr) -> &'static mut PageTable {
     let (level_4_table, _) = Cr3::read();

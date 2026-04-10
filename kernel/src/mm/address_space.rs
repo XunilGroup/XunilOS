@@ -4,10 +4,7 @@ use x86_64::{
     structures::paging::{FrameAllocator, OffsetPageTable, PageTable, PhysFrame, Size4KiB},
 };
 
-use crate::{
-    arch::{arch::FRAME_ALLOCATOR, x86_64::paging::XunilFrameAllocator},
-    driver::syscall::memset,
-};
+use crate::arch::arch::FRAME_ALLOCATOR;
 
 pub struct AddressSpace {
     cr3_frame: PhysFrame<Size4KiB>,
@@ -24,7 +21,7 @@ impl AddressSpace {
             core::ptr::write_bytes(new_pml4_ptr, 0, 512);
         }
 
-        let (cur_pml4, pml4_flags) = Cr3::read();
+        let (cur_pml4, _) = Cr3::read();
 
         unsafe {
             let cur_pml4_ptr =
@@ -38,7 +35,7 @@ impl AddressSpace {
             }
         }
 
-        let mut mapper = unsafe {
+        let mapper = unsafe {
             let addr = frame_allocator.hhdm_offset + new_pml4.start_address().as_u64();
             let virtual_addr = VirtAddr::new(addr);
             let level_4_table: *mut PageTable = virtual_addr.as_mut_ptr();

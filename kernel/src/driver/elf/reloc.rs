@@ -1,5 +1,5 @@
 use crate::driver::elf::{
-    header::{Elf64Ehdr, Elf64Rel, Elf64Rela, Elf64Shdr, R_X86_64_64},
+    header::{Elf64Ehdr, Elf64Rel, Elf64Shdr, R_X86_64_64},
     section::{elf_get_symval, elf_section},
 };
 

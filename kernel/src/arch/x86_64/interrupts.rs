@@ -1,15 +1,9 @@
 use crate::{
     arch::x86_64::{gdt, mouse::mouse_interrupt},
-    driver::{
-        keyboard::{KEYBOARD_STATE, KeyboardEvent},
-        mouse::MOUSE,
-        timer::TIMER,
-    },
+    driver::{keyboard::process_keyboard_event, mouse::MOUSE, timer::TIMER},
     println,
-    util::serial_print,
 };
 use lazy_static::lazy_static;
-use pc_keyboard::DecodedKey;
 use pic8259::ChainedPics;
 use spin::Mutex;
 use x86_64::{
@@ -19,8 +13,8 @@ use x86_64::{
     structures::idt::{InterruptDescriptorTable, InterruptStackFrame, PageFaultErrorCode},
 };
 
-pub const PIC_1_OFFSET: u8 = 32;
-pub const PIC_2_OFFSET: u8 = PIC_1_OFFSET + 8;
+pub const PIC_1_OFFSET: u8 = 32; // master
+pub const PIC_2_OFFSET: u8 = PIC_1_OFFSET + 8; // slave
 
 pub static PICS: Mutex<ChainedPics> =
     Mutex::new(unsafe { ChainedPics::new(PIC_1_OFFSET, PIC_2_OFFSET) });
@@ -134,20 +128,8 @@ extern "x86-interrupt" fn mouse_interrupt_handler(_stack_frame: InterruptStackFr
 pub extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStackFrame) {
     let mut port = Port::new(0x60);
     let scancode: u8 = unsafe { port.read() };
-    let mut keyboard_state = KEYBOARD_STATE.lock();
 
-    if let Ok(Some(key_event)) = keyboard_state.keyboard.add_byte(scancode) {
-        if let Some(key) = keyboard_state.keyboard.process_keyevent(key_event) {
-            match key {
-                DecodedKey::Unicode(character) => keyboard_state
-                    .event_queue
-                    .push_back(KeyboardEvent::Unicode(character)),
-                DecodedKey::RawKey(key) => keyboard_state
-                    .event_queue
-                    .push_back(KeyboardEvent::RawKey(key)),
-            }
-        }
-    }
+    process_keyboard_event(scancode);
 
     unsafe {
         PICS.lock()
@@ -175,6 +157,7 @@ unsafe extern "C" fn syscall_interrupt_handler() {
         "push rdi",
         "push rax",
         "sub rsp, 8",
+        "sti",          // allow IRQ interrupts
         "mov rcx, rdx", // arg2
         "mov rdx, rsi", // arg1
         "mov rsi, rdi", // arg0

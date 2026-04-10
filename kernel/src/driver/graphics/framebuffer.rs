@@ -80,9 +80,9 @@ impl Framebuffer {
         let w = core::cmp::min(src_width, self.width);
 
         for y in 0..h {
-            let src_row = src_ptr.add(y * src_width);
-            let dst_row = self.back_buffer.as_mut_ptr().add(y * self.pitch);
-            core::ptr::copy_nonoverlapping(src_row, dst_row, w);
+            let src_row = unsafe { src_ptr.add(y * src_width) };
+            let dst_row = unsafe { self.back_buffer.as_mut_ptr().add(y * self.pitch) };
+            unsafe { core::ptr::copy_nonoverlapping(src_row, dst_row, w) };
         }
     }
 

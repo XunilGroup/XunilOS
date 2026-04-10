@@ -16,7 +16,7 @@ pub struct ConsoleWriter<'a> {
 impl Write for ConsoleWriter<'_> {
     fn write_str(&mut self, s: &str) -> fmt::Result {
         serial_print(s);
-        self.console.render_text(self.fb, s, 2, false);
+        // self.console.render_text(self.fb, s, 2, false);
         Ok(())
     }
 }

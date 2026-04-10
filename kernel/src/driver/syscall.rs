@@ -3,9 +3,9 @@ use core::{
     ptr::null_mut,
 };
 
-use alloc::string::ToString;
 use x86_64::{
     VirtAddr,
+    instructions::interrupts::without_interrupts,
     structures::paging::{FrameAllocator, Mapper, Page, PageTableFlags, Size4KiB},
 };
 
@@ -13,11 +13,13 @@ use crate::{
     arch::arch::{FRAME_ALLOCATOR, get_allocator, infinite_idle, sleep},
     driver::{
         graphics::{framebuffer::with_framebuffer, primitives::rectangle_filled},
+        keyboard::KeyboardEvent,
         timer::TIMER,
     },
+    mm::usercopy::copy_to_user,
     print, println,
     task::scheduler::SCHEDULER,
-    util::{align_up, serial_print},
+    util::align_up,
 };
 
 const READ: usize = 0;
@@ -41,10 +43,11 @@ const UNLINK: usize = 87;
 const GETDENTS64: usize = 217;
 const CLOCK_GETTIME: usize = 228;
 const EXIT_GROUP: usize = 231;
+const KBD_READ: usize = 666;
 const SLEEP: usize = 909090; // zzz haha
 const DRAW_PIXEL: usize = 5555;
 const FRAMEBUFFER_SWAP: usize = 6666;
-pub const DRAW_BUFFER: usize = 7777;
+const DRAW_BUFFER: usize = 7777;
 
 pub unsafe fn malloc(size: usize, align: usize) -> *mut u8 {
     let align = if align < 1 {
@@ -81,8 +84,40 @@ pub unsafe fn memset(ptr: *mut u8, val: u8, count: usize) {
     unsafe { core::ptr::write_bytes(ptr, val, count) };
 }
 
+fn kbd_read(user_ptr: *mut KeyboardEvent, max_events: isize) -> isize {
+    if max_events <= 0 || user_ptr.is_null() {
+        return -1;
+    }
+
+    let pid = without_interrupts(|| {
+        let scheduler = SCHEDULER.lock();
+        scheduler.current_process
+    });
+
+    if pid < 0 {
+        return -1;
+    }
+
+    return SCHEDULER
+        .with_process(pid as u64, |process| {
+            let to_copy = (max_events as usize).min(process.kbd_buffer.len());
+            if let Ok(_) = copy_to_user(
+                &mut process.address_space.mapper,
+                user_ptr as *mut u8,
+                process.kbd_buffer.as_ptr() as *const u8,
+                to_copy * size_of::<KeyboardEvent>(),
+            ) {
+                process.kbd_buffer.drain(0..to_copy);
+                return to_copy as isize;
+            } else {
+                return -1;
+            };
+        })
+        .unwrap_or(-1);
+}
+
 pub unsafe fn sbrk(increment: isize) -> isize {
-    let mut scheduler = SCHEDULER.lock();
+    let scheduler = without_interrupts(|| SCHEDULER.lock());
     if scheduler.current_process == -1 {
         return -1;
     }
@@ -91,7 +126,7 @@ pub unsafe fn sbrk(increment: isize) -> isize {
 
     let mut frame_allocator = FRAME_ALLOCATOR.lock();
     return SCHEDULER
-        .with_process(pid as u64, |mut process| {
+        .with_process(pid as u64, |process| {
             let (heap_end, heap_base, stack_top) =
                 (process.heap_end, process.heap_base, process.stack_top);
 
@@ -161,7 +196,7 @@ pub unsafe extern "C" fn syscall_dispatch(
     arg2: isize,
 ) -> isize {
     match num {
-        BRK => sbrk(arg0),
+        BRK => unsafe { sbrk(arg0) },
         WRITE => {
             let buf_ptr = arg1 as *const u8;
             let len = arg2 as usize;
@@ -185,10 +220,6 @@ pub unsafe extern "C" fn syscall_dispatch(
             with_framebuffer(|fb| fb.swap());
             infinite_idle();
         }
-        67 => {
-            println!("{:?}", arg1);
-            0
-        }
         SLEEP => {
             sleep(arg0 as u64);
             0
@@ -201,12 +232,13 @@ pub unsafe extern "C" fn syscall_dispatch(
             0
         }
         DRAW_BUFFER => {
-            with_framebuffer(|mut fb| {
-                fb.load_from_ptr(arg0 as *const u32, arg1 as usize, arg2 as usize);
+            with_framebuffer(|fb| {
+                unsafe { fb.load_from_ptr(arg0 as *const u32, arg1 as usize, arg2 as usize) };
                 fb.swap();
             });
             0
         }
+        KBD_READ => kbd_read(arg0 as *mut KeyboardEvent, arg1),
         FRAMEBUFFER_SWAP => {
             with_framebuffer(|fb| {
                 fb.swap();

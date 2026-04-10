@@ -1,6 +1,8 @@
-use crate::{arch::x86_64::paging::XunilFrameAllocator, mm::address_space::AddressSpace};
+use alloc::vec::Vec;
 
-enum ProcessState {
+use crate::{driver::keyboard::KeyboardEvent, mm::address_space::AddressSpace};
+
+pub enum ProcessState {
     Ready,
     Running,
     Blocked,
@@ -10,10 +12,10 @@ enum ProcessState {
 pub struct Process {
     pub pid: u64,
     pub state: ProcessState,
-    // cpu_ctx: &[u8],
     pub stack_top: u64,
     pub heap_base: u64,
     pub heap_end: u64,
+    pub kbd_buffer: Vec<KeyboardEvent>,
     pub address_space: AddressSpace,
     pub user_entry: u64,
 }
@@ -33,6 +35,7 @@ impl Process {
             state: ProcessState::Ready,
             heap_base,
             heap_end,
+            kbd_buffer: Vec::new(),
             address_space,
             user_entry,
         })

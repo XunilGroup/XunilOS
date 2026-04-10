@@ -1,6 +1,5 @@
 use core::ptr::null;
 
-use alloc::boxed::Box;
 use x86_64::structures::paging::OffsetPageTable;
 
 use crate::driver::{

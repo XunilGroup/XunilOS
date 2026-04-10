@@ -3,8 +3,6 @@ use core::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
-use crate::util::serial_print;
-
 pub static TIMER: Timer = Timer::new();
 
 pub struct Timer {
