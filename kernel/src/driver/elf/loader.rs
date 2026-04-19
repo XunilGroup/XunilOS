@@ -2,8 +2,9 @@ use core::ptr::null;
 
 use x86_64::structures::paging::OffsetPageTable;
 
-use crate::driver::{
-    elf::{
+use crate::{
+    arch::syscall::{malloc, memset},
+    driver::elf::{
         header::{
             ET_DYN, ET_EXEC, ET_REL, Elf64Ehdr, Elf64Rel, Elf64Shdr, SHF_ALLOC, SHT_NOBITS, SHT_REL,
         },
@@ -12,7 +13,6 @@ use crate::driver::{
         section::elf_sheader,
         validation::validate_elf,
     },
-    syscall::{malloc, memset},
 };
 
 pub fn load_file(mapper: &mut OffsetPageTable, elf_bytes: &[u8]) -> (*const u8, u64) {

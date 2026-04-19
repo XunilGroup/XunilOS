@@ -12,19 +12,15 @@ use x86_64::{
 };
 
 use crate::{
-    arch::arch::FRAME_ALLOCATOR,
-    driver::{
-        elf::{
-            header::{
-                DT_JMPREL, DT_NEEDED, DT_NULL, DT_PLTREL, DT_PLTRELSZ, DT_RELA, DT_RELAENT,
-                DT_RELASZ, DT_STRSZ, DT_STRTAB, DT_SYMENT, DT_SYMTAB, Elf64Dyn, Elf64Ehdr,
-                Elf64Phdr, Elf64Rela, Elf64Sym, PF_X, PT_DYNAMIC, PT_LOAD, R_X86_64_64,
-                R_X86_64_GLOB_DAT, R_X86_64_JUMP_SLOT, R_X86_64_NONE, R_X86_64_RELATIVE, SHN_UNDEF,
-                STB_WEAK,
-            },
-            reloc::elf_do_reloc,
+    arch::{arch::FRAME_ALLOCATOR, syscall::memset},
+    driver::elf::{
+        header::{
+            DT_JMPREL, DT_NEEDED, DT_NULL, DT_PLTREL, DT_PLTRELSZ, DT_RELA, DT_RELAENT, DT_RELASZ,
+            DT_STRSZ, DT_STRTAB, DT_SYMENT, DT_SYMTAB, Elf64Dyn, Elf64Ehdr, Elf64Phdr, Elf64Rela,
+            Elf64Sym, PF_X, PT_DYNAMIC, PT_LOAD, R_X86_64_64, R_X86_64_GLOB_DAT,
+            R_X86_64_JUMP_SLOT, R_X86_64_NONE, R_X86_64_RELATIVE, SHN_UNDEF, STB_WEAK,
         },
-        syscall::memset,
+        reloc::elf_do_reloc,
     },
     util::{align_down, align_up},
 };

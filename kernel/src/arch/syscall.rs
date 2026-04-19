@@ -5,6 +5,7 @@ use core::{
 
 use x86_64::{
     VirtAddr,
+    instructions::interrupts,
     structures::paging::{FrameAllocator, Mapper, Page, PageTableFlags, Size4KiB},
 };
 
@@ -190,7 +191,11 @@ pub unsafe extern "C" fn syscall_dispatch(
     arg0: isize,
     arg1: isize,
     arg2: isize,
+    arg3: isize,
+    arg4: isize,
+    arg5: isize,
 ) -> isize {
+    interrupts::enable();
     match num {
         BRK => unsafe { sbrk(arg0) },
         WRITE => {

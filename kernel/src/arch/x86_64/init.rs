@@ -3,6 +3,7 @@ use crate::{
         gdt::load_gdt_x86_64,
         interrupts::{PICS, init_idt_x86_64},
         mouse::setup_mouse,
+        syscall::init_syscalls,
     },
     driver::mouse::MOUSE,
 };
@@ -73,6 +74,8 @@ pub fn init_x86_64<'a>(
     }
 
     init_idt_x86_64();
+
+    init_syscalls();
 
     unsafe {
         let mut pics = PICS.lock();

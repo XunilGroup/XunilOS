@@ -10,7 +10,8 @@ use x86_64::structures::{
 pub const DOUBLE_FAULT_IST_INDEX: u16 = 0;
 
 lazy_static! {
-    static ref TSS: TaskStateSegment = {
+    #[repr(C, align(4096))]
+    pub static ref TSS: TaskStateSegment = {
         let mut tss = TaskStateSegment::new();
         tss.interrupt_stack_table[DOUBLE_FAULT_IST_INDEX as usize] = {
             const STACK_SIZE: usize = 4096 * 5;
@@ -40,22 +41,33 @@ lazy_static! {
             SegmentSelector,
             SegmentSelector,
             SegmentSelector,
+            SegmentSelector,
             SegmentSelector
         )
     ) = {
         let mut gdt = GlobalDescriptorTable::new();
         let kernel_code_selector = gdt.append(Descriptor::kernel_code_segment());
         let kernel_data_selector = gdt.append(Descriptor::kernel_data_segment());
-        let user_code_selector = gdt.append(Descriptor::user_code_segment());
+
+        let user_code32_selector = gdt.append(Descriptor::UserSegment(
+            (x86_64::structures::gdt::DescriptorFlags::USER_SEGMENT
+                | x86_64::structures::gdt::DescriptorFlags::PRESENT
+                | x86_64::structures::gdt::DescriptorFlags::EXECUTABLE
+                | x86_64::structures::gdt::DescriptorFlags::DPL_RING_3)
+                .bits(),
+        ));
+
         let user_data_selector = gdt.append(Descriptor::user_data_segment());
+        let user_code_selector = gdt.append(Descriptor::user_code_segment());
         let tss_selector = gdt.append(Descriptor::tss_segment(&TSS));
         (
             gdt,
             (
                 kernel_code_selector,
                 kernel_data_selector,
-                user_code_selector,
+                user_code32_selector,
                 user_data_selector,
+                user_code_selector,
                 tss_selector,
             ),
         )
@@ -70,12 +82,12 @@ pub fn load_gdt_x86_64() {
         DS::set_reg(GDT.1.1);
         ES::set_reg(GDT.1.1);
         SS::set_reg(GDT.1.1);
-        load_tss(GDT.1.4);
+        load_tss(GDT.1.5);
     }
 }
 
 pub fn user_code_selector() -> SegmentSelector {
-    GDT.1.2
+    GDT.1.4
 }
 
 pub fn user_data_selector() -> SegmentSelector {
