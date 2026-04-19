@@ -5,7 +5,6 @@ use core::{
 
 use x86_64::{
     VirtAddr,
-    instructions::interrupts::without_interrupts,
     structures::paging::{FrameAllocator, Mapper, Page, PageTableFlags, Size4KiB},
 };
 
@@ -13,12 +12,12 @@ use crate::{
     arch::arch::{FRAME_ALLOCATOR, get_allocator, infinite_idle, sleep},
     driver::{
         graphics::{framebuffer::with_framebuffer, primitives::rectangle_filled},
-        keyboard::KeyboardEvent,
+        keyboard::{KeyboardEvent, process_scancodes},
         timer::TIMER,
     },
     mm::usercopy::copy_to_user,
     print, println,
-    task::scheduler::SCHEDULER,
+    task::scheduler::{SCHEDULER, current_pid},
     util::align_up,
 };
 
@@ -85,16 +84,14 @@ pub unsafe fn memset(ptr: *mut u8, val: u8, count: usize) {
 }
 
 fn kbd_read(user_ptr: *mut KeyboardEvent, max_events: isize) -> isize {
+    process_scancodes();
     if max_events <= 0 || user_ptr.is_null() {
         return -1;
     }
 
-    let pid = without_interrupts(|| {
-        let scheduler = SCHEDULER.lock();
-        scheduler.current_process
-    });
+    let pid = current_pid().unwrap_or(0);
 
-    if pid < 0 {
+    if pid == 0 {
         return -1;
     }
 
@@ -117,12 +114,11 @@ fn kbd_read(user_ptr: *mut KeyboardEvent, max_events: isize) -> isize {
 }
 
 pub unsafe fn sbrk(increment: isize) -> isize {
-    let scheduler = without_interrupts(|| SCHEDULER.lock());
-    if scheduler.current_process == -1 {
+    let pid = current_pid().unwrap_or(0);
+
+    if pid == 0 {
         return -1;
     }
-    let pid = scheduler.current_process as u64;
-    drop(scheduler);
 
     let mut frame_allocator = FRAME_ALLOCATOR.lock();
     return SCHEDULER

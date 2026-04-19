@@ -105,5 +105,5 @@ pub fn with_framebuffer<F: FnOnce(&mut Framebuffer)>(f: F) {
         if let Some(fb) = guard.as_mut() {
             f(fb);
         }
-    })
+    });
 }

@@ -20,6 +20,7 @@ pub mod util;
 use crate::arch::arch::{infinite_idle, init, kernel_crash};
 use crate::driver::graphics::base::rgb;
 use crate::driver::graphics::framebuffer::{init_framebuffer, with_framebuffer};
+use crate::driver::keyboard::init_keyboard;
 use crate::driver::serial::{ConsoleWriter, init_serial_console, with_serial_console};
 use crate::driver::timer::TIMER;
 use crate::userspace_stub::userspace_init;
@@ -105,7 +106,7 @@ unsafe extern "C" fn kmain() -> ! {
             kernel_crash(); // Could not get required info from Limine's memory map.
         }
     } else {
-        kernel_crash(); // Could not get required info from the Limine's higher-half direct mapping.
+        kernel_crash(); // Could not get required info from Limine's higher-half direct mapping.
     }
 
     if let Some(framebuffer_response) = FRAMEBUFFER_REQUEST.get_response() {
@@ -115,6 +116,8 @@ unsafe extern "C" fn kmain() -> ! {
     }
 
     init_serial_console(0, 0);
+
+    init_keyboard();
 
     if let Some(date_at_boot_response) = DATE_AT_BOOT_REQUEST.get_response() {
         TIMER.set_date_at_boot(date_at_boot_response.timestamp().as_secs());

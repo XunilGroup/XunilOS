@@ -1,6 +1,6 @@
 use crate::{
     arch::x86_64::{gdt, mouse::mouse_interrupt},
-    driver::{keyboard::process_keyboard_event, mouse::MOUSE, timer::TIMER},
+    driver::{keyboard::push_scancode, mouse::MOUSE, timer::TIMER},
     println,
 };
 use lazy_static::lazy_static;
@@ -129,7 +129,7 @@ pub extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: Interrupt
     let mut port = Port::new(0x60);
     let scancode: u8 = unsafe { port.read() };
 
-    process_keyboard_event(scancode);
+    push_scancode(scancode);
 
     unsafe {
         PICS.lock()
