@@ -17,13 +17,19 @@ pub mod task;
 pub mod userspace_stub;
 pub mod util;
 
-use crate::arch::arch::{infinite_idle, init, kernel_crash};
+use crate::arch::arch::{infinite_idle, init, kernel_crash, run_elf};
+use crate::driver::elf::loader::load_file;
 use crate::driver::graphics::base::rgb;
 use crate::driver::graphics::framebuffer::{init_framebuffer, with_framebuffer};
 use crate::driver::keyboard::init_keyboard;
 use crate::driver::serial::{ConsoleWriter, init_serial_console, with_serial_console};
 use crate::driver::timer::TIMER;
-use crate::userspace_stub::userspace_init;
+
+#[repr(C, align(16))]
+struct AlignedElf([u8; include_bytes!("../../assets/init").len()]);
+static INIT_ELF: AlignedElf = AlignedElf(*include_bytes!("../../assets/init"));
+static INIT_ELF_BYTES: &[u8] = &INIT_ELF.0;
+
 /// Sets the base revision to the latest revision supported by the crate.
 /// See specification for further info.
 /// Be sure to mark all limine requests with #[used], otherwise they may be removed by the compiler.
@@ -125,7 +131,14 @@ unsafe extern "C" fn kmain() -> ! {
         println!("Could not get date at boot. Will default to 0.")
     }
 
-    userspace_init(&mut mapper)
+    let (entry_point, heap_base) = load_file(&mut mapper, INIT_ELF_BYTES);
+    println!("Entry point: {:?}", entry_point);
+
+    with_framebuffer(|fb| fb.swap());
+
+    run_elf(entry_point, heap_base);
+
+    loop {}
 }
 
 #[panic_handler]
