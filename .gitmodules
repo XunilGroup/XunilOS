@@ -4,3 +4,6 @@
 [submodule "user/libxunil"]
 	path = user/libxunil
 	url = https://github.com/XunilGroup/libxunil.git
+[submodule "user/init"]
+	path = user/init
+	url = git@github.com:XunilGroup/xunil-init.git
