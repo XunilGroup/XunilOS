@@ -14,7 +14,6 @@ pub mod arch;
 pub mod driver;
 pub mod mm;
 pub mod task;
-pub mod userspace_stub;
 pub mod util;
 
 use crate::arch::arch::{infinite_idle, init, kernel_crash, run_elf};
