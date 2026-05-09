@@ -22,12 +22,12 @@ pub fn init<'a>(
 
 #[cfg(target_arch = "x86_64")]
 pub fn enter_usermode(user_rip: u64, user_rsp: u64) {
-    return enter_usermode_x86_64(user_rip, user_rsp);
+    enter_usermode_x86_64(user_rip, user_rsp);
 }
 
 #[cfg(target_arch = "x86_64")]
-pub fn run_elf(entry_point: *const u8, heap_base: u64) {
-    run_elf_x86_64(entry_point, heap_base);
+pub fn run_elf(file_bytes: &[u8]) {
+    run_elf_x86_64(file_bytes);
 }
 
 pub fn get_allocator<'a>() -> &'static impl GlobalAlloc {

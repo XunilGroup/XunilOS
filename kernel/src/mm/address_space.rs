@@ -29,7 +29,7 @@ impl AddressSpace {
             let new_pml4_ptr =
                 physical_to_virt_pointer(new_pml4.start_address(), frame_allocator.hhdm_offset);
 
-            for i in 0..512 {
+            for i in 256..512 {
                 let val = core::ptr::read(cur_pml4_ptr.add(i));
                 core::ptr::write(new_pml4_ptr.add(i), val);
             }

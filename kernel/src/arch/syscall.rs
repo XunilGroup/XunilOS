@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use core::{
     alloc::{GlobalAlloc, Layout},
     ptr::null_mut,
@@ -12,11 +14,12 @@ use x86_64::{
 use crate::{
     arch::arch::{FRAME_ALLOCATOR, get_allocator, infinite_idle, sleep},
     driver::{
-        graphics::{framebuffer::with_framebuffer, primitives::rectangle_filled},
+        fs::vfs::{vfs_close, vfs_lseek, vfs_open, vfs_read},
+        graphics::framebuffer::with_framebuffer,
         keyboard::{KeyboardEvent, process_scancodes},
         timer::TIMER,
     },
-    mm::usercopy::copy_to_user,
+    mm::usercopy::{copy_cstr_from_user, copy_to_user},
     print, println,
     task::scheduler::{SCHEDULER, current_pid},
     util::align_up,
@@ -29,7 +32,7 @@ const CLOSE: usize = 3;
 const STAT: usize = 4;
 const LSEEK: usize = 8;
 const MMAP: usize = 9;
-const MUNMAP: usize = 9;
+const MUNMAP: usize = 11;
 const BRK: usize = 12;
 const GETPID: usize = 39;
 const FORK: usize = 57;
@@ -45,9 +48,8 @@ const CLOCK_GETTIME: usize = 228;
 const EXIT_GROUP: usize = 231;
 const KBD_READ: usize = 666;
 const SLEEP: usize = 909090; // zzz haha
-const DRAW_PIXEL: usize = 5555;
-const FRAMEBUFFER_SWAP: usize = 6666;
-const DRAW_BUFFER: usize = 7777;
+pub const MAP_FRAMEBUFFER: usize = 5555;
+pub const FRAMEBUFFER_SWAP: usize = 6666;
 
 pub unsafe fn malloc(size: usize, align: usize) -> *mut u8 {
     let align = if align < 1 {
@@ -84,6 +86,64 @@ pub unsafe fn memset(ptr: *mut u8, val: u8, count: usize) {
     unsafe { core::ptr::write_bytes(ptr, val, count) };
 }
 
+fn map_framebuffer() -> isize {
+    0
+}
+
+fn read(ptr: isize, size: isize, nmemb: isize, fd: isize) -> isize {
+    let pid = current_pid().unwrap_or(0);
+    if pid == 0 {
+        return -1;
+    }
+
+    SCHEDULER
+        .with_process(pid, |process| {
+            let len = size * nmemb;
+            let to_read = vfs_read(fd as i64, len as usize);
+
+            if let Some(read_ptr) = to_read {
+                let address_space = process.address_space.as_mut().unwrap();
+                if copy_to_user(
+                    &mut address_space.mapper,
+                    ptr as *mut u8,
+                    read_ptr.0,
+                    read_ptr.1,
+                )
+                .is_err()
+                {
+                    return -1;
+                };
+
+                return (read_ptr.1 as isize) / size;
+            } else {
+                return -1;
+            }
+        })
+        .unwrap_or(-1)
+}
+
+fn open(path: isize, mode: isize) -> isize {
+    let pid = current_pid().unwrap_or(0);
+    if pid == 0 {
+        return -1;
+    }
+
+    SCHEDULER
+        .with_process(pid, |process| {
+            let address_space = process.address_space.as_mut().unwrap();
+            let path = copy_cstr_from_user(&mut address_space.mapper, path as *const u8, 256)?;
+            let mode = copy_cstr_from_user(&mut address_space.mapper, mode as *const u8, 16)?;
+
+            Ok::<isize, isize>(vfs_open(&path, &mode) as isize)
+        })
+        .unwrap_or(Err(-1))
+        .unwrap_or(-1)
+}
+
+fn close(fd: isize) -> isize {
+    vfs_close(fd as i64) as isize
+}
+
 fn kbd_read(user_ptr: *mut KeyboardEvent, max_events: isize) -> isize {
     process_scancodes();
     if max_events <= 0 || user_ptr.is_null() {
@@ -99,8 +159,9 @@ fn kbd_read(user_ptr: *mut KeyboardEvent, max_events: isize) -> isize {
     return SCHEDULER
         .with_process(pid as u64, |process| {
             let to_copy = (max_events as usize).min(process.kbd_buffer.len());
+            let address_space = process.address_space.as_mut().unwrap();
             if let Ok(_) = copy_to_user(
-                &mut process.address_space.mapper,
+                &mut address_space.mapper,
                 user_ptr as *mut u8,
                 process.kbd_buffer.as_ptr() as *const u8,
                 to_copy * size_of::<KeyboardEvent>(),
@@ -153,9 +214,9 @@ pub unsafe fn sbrk(increment: isize) -> isize {
                         // TODO: do not use x86_64 only
                         let virt_addr = VirtAddr::new(addr);
                         let page = Page::<Size4KiB>::containing_address(virt_addr);
+                        let address_space = process.address_space.as_mut().unwrap();
                         unsafe {
-                            process
-                                .address_space
+                            address_space
                                 .mapper
                                 .map_to(
                                     page,
@@ -198,6 +259,7 @@ pub unsafe extern "C" fn syscall_dispatch(
     interrupts::enable();
     match num {
         BRK => unsafe { sbrk(arg0) },
+        READ => read(arg0, arg1, arg2, arg3) as isize,
         WRITE => {
             let buf_ptr = arg1 as *const u8;
             let len = arg2 as usize;
@@ -216,6 +278,9 @@ pub unsafe extern "C" fn syscall_dispatch(
             with_framebuffer(|fb| fb.swap());
             0
         }
+        OPEN => open(arg0, arg1),
+        CLOSE => close(arg0),
+        LSEEK => vfs_lseek(arg0 as i64, arg1 as i64, arg2 as i32) as isize,
         EXIT => {
             println!("Program exit: {}", arg0);
             with_framebuffer(|fb| fb.swap());
@@ -226,19 +291,7 @@ pub unsafe extern "C" fn syscall_dispatch(
             0
         }
         CLOCK_GETTIME => TIMER.now().elapsed() as isize,
-        DRAW_PIXEL => {
-            with_framebuffer(|mut fb| {
-                rectangle_filled(&mut fb, arg0 as usize, arg1 as usize, 4, 4, arg2 as u32);
-            });
-            0
-        }
-        DRAW_BUFFER => {
-            with_framebuffer(|fb| {
-                unsafe { fb.load_from_ptr(arg0 as *const u32, arg1 as usize, arg2 as usize) };
-                fb.swap();
-            });
-            0
-        }
+        MAP_FRAMEBUFFER => map_framebuffer(),
         KBD_READ => kbd_read(arg0 as *mut KeyboardEvent, arg1),
         FRAMEBUFFER_SWAP => {
             with_framebuffer(|fb| {

@@ -19,7 +19,7 @@ fn align_up(addr: usize, align: usize) -> usize {
 #[global_allocator]
 pub static ALLOCATOR: Locked<LinkedListAllocator> = Locked::new(LinkedListAllocator::new());
 
-pub const HEAP_START: usize = 0x_4444_4444_0000;
+pub const HEAP_START: usize = 0xffffffff90000000;
 pub const HEAP_SIZE: usize = 64 * 1024 * 1024; // 64 MiB
 
 pub struct LinkedNode {

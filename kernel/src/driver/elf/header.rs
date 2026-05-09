@@ -1,5 +1,7 @@
 // this is not made by me, but AI, im not going to type these out...
 
+#![allow(dead_code)]
+
 // e_ident indices
 pub const EI_MAG0: usize = 0;
 pub const EI_MAG1: usize = 1;

@@ -30,7 +30,7 @@ pub fn load_file(mapper: &mut OffsetPageTable, elf_bytes: &[u8]) -> (*const u8, 
 
     let elf_header_ptr = elf_bytes.as_ptr() as *const Elf64Ehdr;
 
-    return match unsafe { elf_header.e_type } {
+    return match elf_header.e_type {
         ET_EXEC => unsafe { load_program(mapper, elf_header_ptr, elf_bytes, false) },
         ET_DYN => unsafe { load_program(mapper, elf_header_ptr, elf_bytes, true) },
         ET_REL => return (null(), 0),

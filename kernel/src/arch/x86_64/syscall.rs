@@ -1,7 +1,6 @@
 use core::arch::asm;
 
-use lazy_static::lazy_static;
-use x86_64::instructions::tlb::{self, flush_all};
+use x86_64::instructions::tlb::flush_all;
 
 use crate::arch::x86_64::gdt::{GDT, TSS};
 

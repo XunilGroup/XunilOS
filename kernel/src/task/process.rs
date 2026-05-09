@@ -16,7 +16,7 @@ pub struct Process {
     pub heap_base: u64,
     pub heap_end: u64,
     pub kbd_buffer: Vec<KeyboardEvent>,
-    pub address_space: AddressSpace,
+    pub address_space: Option<AddressSpace>,
     pub user_entry: u64,
 }
 impl Process {
@@ -26,18 +26,16 @@ impl Process {
         stack_top: u64,
         heap_base: u64,
         heap_end: u64,
-    ) -> Option<Process> {
-        let address_space = AddressSpace::new()?;
-
-        Some(Process {
+    ) -> Process {
+        Process {
             pid,
             stack_top,
             state: ProcessState::Ready,
             heap_base,
             heap_end,
             kbd_buffer: Vec::new(),
-            address_space,
+            address_space: None,
             user_entry,
-        })
+        }
     }
 }

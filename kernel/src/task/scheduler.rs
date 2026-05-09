@@ -39,7 +39,7 @@ impl Locked<Scheduler> {
         let mut guard = without_interrupts(|| self.lock());
         let pid = guard.next_pid;
         guard.next_pid += 1;
-        let process = Process::new(pid, entry_point, stack_top, heap_base, heap_base)?;
+        let process = Process::new(pid, entry_point, stack_top, heap_base, heap_base);
         guard.processes.insert(pid, process);
 
         Some(pid)
@@ -52,7 +52,6 @@ impl Locked<Scheduler> {
         };
 
         set_current_pid(Some(pid));
-
         enter_usermode(entry_point as u64, (stack_top & !0xF) - 8);
     }
 

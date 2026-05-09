@@ -102,11 +102,9 @@ unsafe extern "C" fn kmain() -> ! {
     // removed by the linker.
     assert!(BASE_REVISION.is_supported());
 
-    let mut mapper;
-
     if let Some(hhdm_response) = HHDM_REQUEST.get_response() {
         if let Some(memory_map_response) = MEMORY_MAP_REQUEST.get_response() {
-            mapper = init(hhdm_response, memory_map_response);
+            init(hhdm_response, memory_map_response);
         } else {
             kernel_crash(); // Could not get required info from Limine's memory map.
         }
@@ -130,12 +128,9 @@ unsafe extern "C" fn kmain() -> ! {
         println!("Could not get date at boot. Will default to 0.")
     }
 
-    let (entry_point, heap_base) = load_file(&mut mapper, INIT_ELF_BYTES);
-    println!("Entry point: {:?}", entry_point);
-
     with_framebuffer(|fb| fb.swap());
 
-    run_elf(entry_point, heap_base);
+    run_elf(INIT_ELF_BYTES);
 
     loop {}
 }
