@@ -65,11 +65,11 @@ pub fn process_scancodes() {
         };
 
         if let Some(kbd_event) = process_scancode(scancode) {
-            let pid = current_pid().unwrap_or(0);
-            if pid == 0 {
-                continue;
+            let mut scheduler = SCHEDULER.lock();
+            for process in scheduler.processes.values_mut() {
+                process.kbd_buffer.push(kbd_event);
             }
-            SCHEDULER.with_process(pid, |process| process.kbd_buffer.push(kbd_event));
+            drop(scheduler);
         }
     }
 }

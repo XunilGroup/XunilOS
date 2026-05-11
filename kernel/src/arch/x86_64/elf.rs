@@ -9,7 +9,7 @@ use crate::{
     println, task::scheduler::SCHEDULER,
 };
 
-pub fn run_elf_x86_64(file_bytes: &[u8]) {
+pub fn run_elf_x86_64(file_bytes: &[u8], should_swapgs: bool) {
     let stack_base: u64 = 0x0000_7fff_0000_0000;
     let page_count = 4096; // 16 mib
     let page_size = 0x1000u64;
@@ -57,7 +57,7 @@ pub fn run_elf_x86_64(file_bytes: &[u8]) {
             process.address_space = Some(address_space)
         });
 
-        SCHEDULER.run_process(process_pid, entry_point);
+        SCHEDULER.switch_to(process_pid, should_swapgs);
     } else {
         return;
     };

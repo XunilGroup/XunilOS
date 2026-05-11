@@ -1,28 +1,27 @@
 #![allow(dead_code)]
 
-use core::{
-    alloc::{GlobalAlloc, Layout},
-    ptr::null_mut,
-};
-
+use alloc::vec;
 use x86_64::{
-    VirtAddr,
+    PhysAddr, VirtAddr,
     instructions::interrupts,
-    structures::paging::{FrameAllocator, Mapper, Page, PageTableFlags, Size4KiB},
+    structures::paging::{FrameAllocator, Mapper, Page, PageTableFlags, PhysFrame, Size4KiB},
 };
 
 use crate::{
-    arch::arch::{FRAME_ALLOCATOR, get_allocator, infinite_idle, sleep},
+    arch::arch::{FRAME_ALLOCATOR, run_elf, sleep},
     driver::{
         fs::vfs::{vfs_close, vfs_lseek, vfs_open, vfs_read},
-        graphics::framebuffer::with_framebuffer,
+        graphics::framebuffer::{FRAMEBUFFER, USER_FB_BASE, with_framebuffer},
         keyboard::{KeyboardEvent, process_scancodes},
         timer::TIMER,
     },
     mm::usercopy::{copy_cstr_from_user, copy_to_user},
-    print, println,
-    task::scheduler::{SCHEDULER, current_pid},
-    util::align_up,
+    print,
+    task::{
+        process::ProcessState,
+        scheduler::{SCHEDULER, current_pid},
+    },
+    util::{align_down, align_up},
 };
 
 const READ: usize = 0;
@@ -51,43 +50,61 @@ const SLEEP: usize = 909090; // zzz haha
 pub const MAP_FRAMEBUFFER: usize = 5555;
 pub const FRAMEBUFFER_SWAP: usize = 6666;
 
-pub unsafe fn malloc(size: usize, align: usize) -> *mut u8 {
-    let align = if align < 1 {
-        1
-    } else {
-        align.next_power_of_two()
-    };
-    let layout = match Layout::from_size_align(size, align) {
-        Ok(l) => l,
-        Err(_) => return null_mut(),
-    };
-
-    unsafe { GlobalAlloc::alloc(get_allocator(), layout) }
-}
-
-pub unsafe fn free(ptr: *mut u8, size: usize, align: usize) {
-    if ptr.is_null() {
-        // very important, do not double free
-        return;
-    }
-
-    let align = if align < 1 {
-        1
-    } else {
-        align.next_power_of_two()
-    };
-
-    if let Ok(layout) = Layout::from_size_align(size.max(1), align.max(1)) {
-        unsafe { GlobalAlloc::dealloc(get_allocator(), ptr, layout) }
-    }
-}
-
-pub unsafe fn memset(ptr: *mut u8, val: u8, count: usize) {
-    unsafe { core::ptr::write_bytes(ptr, val, count) };
-}
-
 fn map_framebuffer() -> isize {
-    0
+    let pid = current_pid().unwrap_or(0);
+    if pid == 0 {
+        return -1;
+    }
+
+    let framebuffer = FRAMEBUFFER.lock();
+    let fb = match framebuffer.as_ref() {
+        Some(fb) => fb,
+        None => return -1,
+    };
+
+    let struct_phys = fb.meta.struct_phys;
+    let buf_phys = fb.meta.buf_phys;
+    let buf_size = (fb.meta.buf_len * size_of::<u32>()) as u64;
+    let pixel_map_start = align_down(buf_phys, 4096);
+    let pixel_map_end = align_up(buf_phys + buf_size, 4096);
+    drop(framebuffer);
+
+    let mut frame_allocator = FRAME_ALLOCATOR.lock();
+
+    SCHEDULER
+        .with_process(pid, |process| {
+            let address_space = match process.address_space.as_mut() {
+                Some(a) => a,
+                None => return -1,
+            };
+
+            let mut map_page = |virt: u64, phys: u64| unsafe {
+                let frame = PhysFrame::<Size4KiB>::containing_address(PhysAddr::new(phys));
+                let page = Page::<Size4KiB>::containing_address(VirtAddr::new(virt));
+                address_space
+                    .mapper
+                    .map_to(
+                        page,
+                        frame,
+                        PageTableFlags::PRESENT
+                            | PageTableFlags::WRITABLE
+                            | PageTableFlags::USER_ACCESSIBLE
+                            | PageTableFlags::NO_EXECUTE,
+                        &mut *frame_allocator,
+                    )
+                    .unwrap()
+                    .flush();
+            };
+
+            map_page(USER_FB_BASE, struct_phys);
+
+            for offset in (0..pixel_map_end - pixel_map_start).step_by(4096) {
+                map_page(USER_FB_BASE + 0x1000 + offset, pixel_map_start + offset);
+            }
+
+            0
+        })
+        .unwrap_or(-1)
 }
 
 fn read(ptr: isize, size: isize, nmemb: isize, fd: isize) -> isize {
@@ -102,19 +119,22 @@ fn read(ptr: isize, size: isize, nmemb: isize, fd: isize) -> isize {
             let to_read = vfs_read(fd as i64, len as usize);
 
             if let Some(read_ptr) = to_read {
-                let address_space = process.address_space.as_mut().unwrap();
-                if copy_to_user(
-                    &mut address_space.mapper,
-                    ptr as *mut u8,
-                    read_ptr.0,
-                    read_ptr.1,
-                )
-                .is_err()
-                {
-                    return -1;
-                };
+                if let Some(address_space) = process.address_space.as_mut() {
+                    if copy_to_user(
+                        &mut address_space.mapper,
+                        ptr as *mut u8,
+                        read_ptr.0,
+                        read_ptr.1,
+                    )
+                    .is_err()
+                    {
+                        return -1;
+                    };
 
-                return (read_ptr.1 as isize) / size;
+                    return (read_ptr.1 as isize) / size;
+                } else {
+                    return -1;
+                }
             } else {
                 return -1;
             }
@@ -130,7 +150,7 @@ fn open(path: isize, mode: isize) -> isize {
 
     SCHEDULER
         .with_process(pid, |process| {
-            let address_space = process.address_space.as_mut().unwrap();
+            let address_space = process.address_space.as_mut().ok_or::<isize>(-1)?;
             let path = copy_cstr_from_user(&mut address_space.mapper, path as *const u8, 256)?;
             let mode = copy_cstr_from_user(&mut address_space.mapper, mode as *const u8, 16)?;
 
@@ -159,18 +179,21 @@ fn kbd_read(user_ptr: *mut KeyboardEvent, max_events: isize) -> isize {
     return SCHEDULER
         .with_process(pid as u64, |process| {
             let to_copy = (max_events as usize).min(process.kbd_buffer.len());
-            let address_space = process.address_space.as_mut().unwrap();
-            if let Ok(_) = copy_to_user(
-                &mut address_space.mapper,
-                user_ptr as *mut u8,
-                process.kbd_buffer.as_ptr() as *const u8,
-                to_copy * size_of::<KeyboardEvent>(),
-            ) {
-                process.kbd_buffer.drain(0..to_copy);
-                return to_copy as isize;
+            if let Some(address_space) = process.address_space.as_mut() {
+                if let Ok(_) = copy_to_user(
+                    &mut address_space.mapper,
+                    user_ptr as *mut u8,
+                    process.kbd_buffer.as_ptr() as *const u8,
+                    to_copy * size_of::<KeyboardEvent>(),
+                ) {
+                    process.kbd_buffer.drain(0..to_copy);
+                    return to_copy as isize;
+                } else {
+                    return -1;
+                };
             } else {
                 return -1;
-            };
+            }
         })
         .unwrap_or(-1);
 }
@@ -214,23 +237,26 @@ pub unsafe fn sbrk(increment: isize) -> isize {
                         // TODO: do not use x86_64 only
                         let virt_addr = VirtAddr::new(addr);
                         let page = Page::<Size4KiB>::containing_address(virt_addr);
-                        let address_space = process.address_space.as_mut().unwrap();
-                        unsafe {
-                            address_space
-                                .mapper
-                                .map_to(
-                                    page,
-                                    frame,
-                                    PageTableFlags::PRESENT
-                                        | PageTableFlags::WRITABLE
-                                        | PageTableFlags::USER_ACCESSIBLE
-                                        | PageTableFlags::NO_EXECUTE,
-                                    &mut *frame_allocator,
-                                )
-                                .unwrap()
-                                .flush();
+                        if let Some(address_space) = process.address_space.as_mut() {
+                            unsafe {
+                                address_space
+                                    .mapper
+                                    .map_to(
+                                        page,
+                                        frame,
+                                        PageTableFlags::PRESENT
+                                            | PageTableFlags::WRITABLE
+                                            | PageTableFlags::USER_ACCESSIBLE
+                                            | PageTableFlags::NO_EXECUTE,
+                                        &mut *frame_allocator,
+                                    )
+                                    .unwrap()
+                                    .flush();
 
-                            core::ptr::write_bytes(virt_addr.as_mut_ptr::<u8>(), 0, 4096);
+                                core::ptr::write_bytes(virt_addr.as_mut_ptr::<u8>(), 0, 4096);
+                            }
+                        } else {
+                            return -1;
                         }
                     } else {
                         return -1;
@@ -246,6 +272,86 @@ pub unsafe fn sbrk(increment: isize) -> isize {
         .unwrap_or(-1);
 }
 
+pub fn exec(arg0: isize) -> isize {
+    let pid = current_pid().unwrap_or(0);
+    if pid == 0 {
+        return -1;
+    }
+
+    let path = match SCHEDULER.with_process(pid, |process| {
+        let address_space = process.address_space.as_mut().ok_or::<isize>(-1)?;
+        copy_cstr_from_user(&mut address_space.mapper, arg0 as *const u8, 256)
+    }) {
+        Some(Ok(p)) => p,
+        _ => return -1,
+    };
+
+    let fd = vfs_open(path.as_str(), "r");
+    if fd < 0 {
+        return -1;
+    }
+
+    const SEEK_SET: i32 = 0;
+    const SEEK_CUR: i32 = 1;
+    const SEEK_END: i32 = 2;
+
+    if vfs_lseek(fd, 0, SEEK_END) < 0 {
+        vfs_close(fd);
+        return -1;
+    }
+    let size = vfs_lseek(fd, 0, SEEK_CUR);
+    if size <= 0 {
+        vfs_close(fd);
+        return -1;
+    }
+    if vfs_lseek(fd, 0, SEEK_SET) < 0 {
+        vfs_close(fd);
+        return -1;
+    }
+
+    let mut buf = vec![0u8; size as usize];
+    let mut off = 0usize;
+
+    while off < buf.len() {
+        let want = buf.len() - off;
+        let Some((src, n)) = vfs_read(fd, want) else {
+            break;
+        };
+        if n == 0 {
+            break;
+        }
+        unsafe {
+            core::ptr::copy_nonoverlapping(src, buf.as_mut_ptr().add(off), n);
+        }
+        off += n;
+    }
+
+    vfs_close(fd);
+
+    if off != buf.len() {
+        return -1;
+    }
+
+    run_elf(&buf, true);
+    0
+}
+
+pub fn set_reschedule(should_reschedule: bool) {
+    let pid = current_pid().unwrap_or(0);
+
+    if pid == 0 {
+        return;
+    }
+
+    let mut scheduler = SCHEDULER.lock();
+
+    if let Some(process) = scheduler.processes.get_mut(&pid) {
+        process.should_reschedule = should_reschedule;
+    }
+
+    drop(scheduler);
+}
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn syscall_dispatch(
     num: usize,
@@ -257,6 +363,25 @@ pub unsafe extern "C" fn syscall_dispatch(
     arg5: isize,
 ) -> isize {
     interrupts::enable();
+
+    set_reschedule(match num {
+        BRK => false,
+        READ => true,
+        WRITE => false,
+        OPEN => true,
+        CLOSE => true,
+        LSEEK => true,
+        EXIT => true,
+        SLEEP => true,
+        CLOCK_GETTIME => false,
+        MAP_FRAMEBUFFER => false,
+        KBD_READ => true,
+        FRAMEBUFFER_SWAP => true,
+        GETPID => false,
+        EXECVE => true,
+        _ => false,
+    });
+
     match num {
         BRK => unsafe { sbrk(arg0) },
         READ => read(arg0, arg1, arg2, arg3) as isize,
@@ -275,27 +400,60 @@ pub unsafe extern "C" fn syscall_dispatch(
                 }
             }
 
-            with_framebuffer(|fb| fb.swap());
             0
         }
         OPEN => open(arg0, arg1),
         CLOSE => close(arg0),
         LSEEK => vfs_lseek(arg0 as i64, arg1 as i64, arg2 as i32) as isize,
         EXIT => {
-            println!("Program exit: {}", arg0);
-            with_framebuffer(|fb| fb.swap());
-            infinite_idle();
+            let pid = current_pid().unwrap_or(0);
+            if pid == 0 {
+                return 0;
+            }
+
+            let next_pid = {
+                let mut sched = SCHEDULER.lock();
+
+                sched.processes.remove(&pid);
+
+                sched
+                    .processes
+                    .iter()
+                    .find_map(|(other, proc)| {
+                        if *other != pid && matches!(proc.state, ProcessState::Ready) {
+                            Some(*other)
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or(0)
+            };
+
+            if next_pid != 0 {
+                SCHEDULER.switch_to(next_pid, false);
+            }
+
+            crate::arch::arch::infinite_idle();
         }
         SLEEP => {
             sleep(arg0 as u64);
             0
         }
+        EXECVE => exec(arg0),
         CLOCK_GETTIME => TIMER.now().elapsed() as isize,
         MAP_FRAMEBUFFER => map_framebuffer(),
         KBD_READ => kbd_read(arg0 as *mut KeyboardEvent, arg1),
+        GETPID => {
+            let pid = current_pid().unwrap_or(0);
+
+            match pid {
+                0 => return -1,
+                _ => return pid as isize,
+            }
+        }
         FRAMEBUFFER_SWAP => {
             with_framebuffer(|fb| {
-                fb.swap();
+                fb.present();
             });
             0
         }

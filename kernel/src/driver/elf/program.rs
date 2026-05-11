@@ -1,7 +1,4 @@
-use core::{
-    ffi::CStr,
-    ptr::{null, null_mut},
-};
+use core::ptr::{null, null_mut};
 
 use alloc::vec::Vec;
 use x86_64::{
@@ -12,7 +9,7 @@ use x86_64::{
 };
 
 use crate::{
-    arch::{arch::FRAME_ALLOCATOR, syscall::memset},
+    arch::arch::FRAME_ALLOCATOR,
     driver::elf::header::{
         DT_JMPREL, DT_NEEDED, DT_NULL, DT_PLTREL, DT_PLTRELSZ, DT_RELA, DT_RELASZ, DT_STRSZ,
         DT_STRTAB, DT_SYMTAB, Elf64Dyn, Elf64Ehdr, Elf64Phdr, Elf64Rela, Elf64Sym, PF_X,
@@ -123,29 +120,29 @@ pub unsafe fn load_program(
     }
 }
 
-fn cstr_from_strtab(
-    strtab_ptr: *const u8,
-    strtab_size: u64,
-    off: u32,
-) -> Option<&'static core::ffi::CStr> {
-    let off = off as u64;
-    if strtab_ptr.is_null() || off >= strtab_size {
-        return None;
-    }
+// fn cstr_from_strtab(
+//     strtab_ptr: *const u8,
+//     strtab_size: u64,
+//     off: u32,
+// ) -> Option<&'static core::ffi::CStr> {
+//     let off = off as u64;
+//     if strtab_ptr.is_null() || off >= strtab_size {
+//         return None;
+//     }
 
-    let mut i = off;
+//     let mut i = off;
 
-    while i < strtab_size {
-        let b = unsafe { *strtab_ptr.add(i as usize) };
-        if b == 0 {
-            let start = unsafe { strtab_ptr.add(off as usize) } as *const core::ffi::c_char;
-            return Some(unsafe { CStr::from_ptr(start as *const i8) });
-        }
-        i += 1;
-    }
+//     while i < strtab_size {
+//         let b = unsafe { *strtab_ptr.add(i as usize) };
+//         if b == 0 {
+//             let start = unsafe { strtab_ptr.add(off as usize) } as *const core::ffi::c_char;
+//             return Some(unsafe { CStr::from_ptr(start as *const i8) });
+//         }
+//         i += 1;
+//     }
 
-    None
-}
+//     None
+// }
 
 pub fn dyn_get_symaddr(
     strtab_ptr: *const u8,
@@ -159,7 +156,7 @@ pub fn dyn_get_symaddr(
         return Ok(load_bias + sym.st_value);
     }
 
-    let name = cstr_from_strtab(strtab_ptr, strtab_size, idx as u32);
+    // let name = cstr_from_strtab(strtab_ptr, strtab_size, idx as u32);
 
     let bind = sym.st_info >> 4;
     if bind == STB_WEAK { Ok(0) } else { Err(()) }
@@ -340,7 +337,7 @@ pub fn load_segment_to_memory(
         core::ptr::copy_nonoverlapping(src, dst, file_size as usize);
 
         if mem_size > file_size {
-            memset(
+            core::ptr::write_bytes(
                 dst.add(file_size as usize),
                 0,
                 (mem_size - file_size) as usize,

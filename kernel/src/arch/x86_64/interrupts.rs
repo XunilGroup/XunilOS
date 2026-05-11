@@ -1,6 +1,11 @@
+use core::sync::atomic::Ordering;
+
 use crate::{
     arch::x86_64::{gdt, mouse::mouse_interrupt},
-    driver::{keyboard::push_scancode, mouse::MOUSE, timer::TIMER},
+    driver::{
+        graphics::framebuffer::with_framebuffer, keyboard::push_scancode, mouse::MOUSE,
+        serial::with_serial_console, timer::TIMER,
+    },
     println,
 };
 use lazy_static::lazy_static;
@@ -94,6 +99,14 @@ pub extern "x86-interrupt" fn invalid_opcode_handler(stack_frame: InterruptStack
 
 extern "x86-interrupt" fn timer_interrupt_handler(_stack_frame: InterruptStackFrame) {
     TIMER.interrupt();
+
+    let t = TIMER.interrupt_count.load(Ordering::Relaxed);
+    if t % 60 == 0 {
+        with_framebuffer(|fb| {
+            with_serial_console(|serial_console| serial_console.render(fb));
+            fb.present();
+        });
+    }
 
     unsafe {
         PICS.lock()

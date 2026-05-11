@@ -58,6 +58,6 @@ impl AddressSpace {
     }
 }
 
-unsafe fn physical_to_virt_pointer(phys_addr: PhysAddr, hhdm_offset: u64) -> *mut u64 {
+pub unsafe fn physical_to_virt_pointer(phys_addr: PhysAddr, hhdm_offset: u64) -> *mut u64 {
     (hhdm_offset + phys_addr.as_u64()) as *mut u64
 }

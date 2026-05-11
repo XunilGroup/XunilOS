@@ -21,13 +21,13 @@ pub fn init<'a>(
 }
 
 #[cfg(target_arch = "x86_64")]
-pub fn enter_usermode(user_rip: u64, user_rsp: u64) {
-    enter_usermode_x86_64(user_rip, user_rsp);
+pub fn enter_usermode(user_rip: u64, user_rsp: u64, should_swapgs: bool) {
+    enter_usermode_x86_64(user_rip, user_rsp, should_swapgs);
 }
 
 #[cfg(target_arch = "x86_64")]
-pub fn run_elf(file_bytes: &[u8]) {
-    run_elf_x86_64(file_bytes);
+pub fn run_elf(file_bytes: &[u8], should_swapgs: bool) {
+    run_elf_x86_64(file_bytes, should_swapgs);
 }
 
 pub fn get_allocator<'a>() -> &'static impl GlobalAlloc {

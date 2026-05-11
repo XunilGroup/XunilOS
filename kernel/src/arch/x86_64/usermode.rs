@@ -10,7 +10,7 @@ fn with_rpl3(ss: SegmentSelector) -> u64 {
 }
 
 // entry point and stack
-pub fn enter_usermode_x86_64(user_rip: u64, user_rsp: u64) -> ! {
+pub fn enter_usermode_x86_64(user_rip: u64, user_rsp: u64, should_swapgs: bool) -> ! {
     let user_cs = with_rpl3(user_code_selector());
     let user_ss = with_rpl3(user_data_selector());
 
@@ -22,8 +22,11 @@ pub fn enter_usermode_x86_64(user_rip: u64, user_rsp: u64) -> ! {
     let rflags: u64 = 0x202;
 
     unsafe {
+        core::arch::asm!("cli");
+        if should_swapgs {
+            core::arch::asm!("swapgs");
+        }
         core::arch::asm!(
-            "cli",
             "push {user_ss}",
             "push {user_rsp}",
             "push {rflags}",

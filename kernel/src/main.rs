@@ -1,7 +1,7 @@
 #![no_std]
 #![no_main]
 #![feature(abi_x86_interrupt)]
-#![feature(str_from_raw_parts)]
+#![feature(naked_functions_rustic_abi)]
 extern crate alloc;
 use core::fmt::Write;
 
@@ -17,7 +17,6 @@ pub mod task;
 pub mod util;
 
 use crate::arch::arch::{infinite_idle, init, kernel_crash, run_elf};
-use crate::driver::elf::loader::load_file;
 use crate::driver::graphics::base::rgb;
 use crate::driver::graphics::framebuffer::{init_framebuffer, with_framebuffer};
 use crate::driver::keyboard::init_keyboard;
@@ -118,7 +117,7 @@ unsafe extern "C" fn kmain() -> ! {
         }
     }
 
-    init_serial_console(0, 0);
+    init_serial_console();
 
     init_keyboard();
 
@@ -128,9 +127,7 @@ unsafe extern "C" fn kmain() -> ! {
         println!("Could not get date at boot. Will default to 0.")
     }
 
-    with_framebuffer(|fb| fb.swap());
-
-    run_elf(INIT_ELF_BYTES);
+    run_elf(INIT_ELF_BYTES, false);
 
     loop {}
 }
@@ -141,7 +138,7 @@ fn rust_panic(_info: &core::panic::PanicInfo) -> ! {
         fb.clear(rgb(180, 0, 0));
 
         with_serial_console(|console| {
-            console.clear(5, 5);
+            console.clear();
 
             let mut writer = ConsoleWriter {
                 fb: &mut fb,
@@ -151,7 +148,6 @@ fn rust_panic(_info: &core::panic::PanicInfo) -> ! {
 
             let _ = writer.write_str("KERNEL PANIC\n\n");
             let _ = writer.write_fmt(core::format_args!("{}", _info));
-            fb.swap();
         });
     });
 

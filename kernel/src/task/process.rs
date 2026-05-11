@@ -1,12 +1,20 @@
 use alloc::vec::Vec;
 
-use crate::{driver::keyboard::KeyboardEvent, mm::address_space::AddressSpace};
+use crate::{
+    driver::keyboard::KeyboardEvent, mm::address_space::AddressSpace, task::context::UserContext,
+};
 
 pub enum ProcessState {
     Ready,
     Running,
     Blocked,
     Zombie,
+}
+
+pub struct ProcessInfo {
+    pub exit_code: usize,
+    pub parent: usize,
+    pub wake_tick: Option<u64>,
 }
 
 pub struct Process {
@@ -17,7 +25,10 @@ pub struct Process {
     pub heap_end: u64,
     pub kbd_buffer: Vec<KeyboardEvent>,
     pub address_space: Option<AddressSpace>,
+    pub saved_ctx: Option<UserContext>,
+    pub should_reschedule: bool,
     pub user_entry: u64,
+    pub info: ProcessInfo,
 }
 impl Process {
     pub fn new(
@@ -35,7 +46,14 @@ impl Process {
             heap_end,
             kbd_buffer: Vec::new(),
             address_space: None,
+            saved_ctx: None,
+            should_reschedule: false,
             user_entry,
+            info: ProcessInfo {
+                exit_code: 0,
+                parent: 0,
+                wake_tick: None,
+            },
         }
     }
 }

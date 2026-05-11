@@ -1,6 +1,7 @@
 use crate::driver::graphics::font_render::render_text;
 use crate::driver::graphics::framebuffer::Framebuffer;
 use crate::{driver::graphics::base::rgb, util::serial_print};
+use alloc::string::String;
 use core::fmt::{self, Write};
 use spin::Mutex;
 
@@ -16,61 +17,53 @@ pub struct ConsoleWriter<'a> {
 impl Write for ConsoleWriter<'_> {
     fn write_str(&mut self, s: &str) -> fmt::Result {
         serial_print(s);
-        self.console.render_text(self.fb, s, 2, false);
+        self.console.print(s, self.fb);
         Ok(())
     }
 }
 
 pub struct SerialConsole {
-    start_x: usize,
-    pub current_x: usize,
-    current_y: usize,
+    text: String,
+    font_size: usize,
+    dirty: bool,
 }
 
 impl SerialConsole {
-    pub fn new(start_x: usize, start_y: usize) -> SerialConsole {
+    pub fn new() -> SerialConsole {
         SerialConsole {
-            start_x,
-            current_x: start_x,
-            current_y: start_y,
+            text: String::new(),
+            font_size: 2,
+            dirty: false,
         }
     }
 
-    pub fn render_text(
-        &mut self,
-        fb: &mut Framebuffer,
-        text: &str,
-        font_size: usize,
-        should_center: bool,
-    ) {
-        let (new_x, new_y) = render_text(
-            fb,
-            if should_center {
-                self.current_x - (text.len() - text.matches('\n').count()) * (font_size * 4)
-            } else {
-                self.current_x
-            },
-            self.current_y,
-            text,
-            font_size,
-            rgb(255, 255, 255),
-            self.start_x,
-        );
-        self.current_x = new_x;
-        self.current_y = new_y;
+    pub fn print(&mut self, text: &str, fb: &mut Framebuffer) {
+        let max_height = fb.height / (12 * self.font_size);
+        if self.text.split('\n').count() > max_height {
+            self.clear();
+        }
+        self.text.push_str(text);
+        self.dirty = true;
     }
 
-    pub fn clear(&mut self, start_x: usize, start_y: usize) {
-        self.start_x = start_x;
-        self.current_x = start_x;
-        self.current_y = start_y;
+    pub fn render(&mut self, fb: &mut Framebuffer) {
+        if self.dirty {
+            fb.clear(rgb(0, 0, 0));
+            self.dirty = false;
+            render_text(fb, 0, 0, &self.text, self.font_size, rgb(255, 255, 255), 0);
+        }
+    }
+
+    pub fn clear(&mut self) {
+        self.dirty = true;
+        self.text.clear();
     }
 }
 
 pub static SERIAL_CONSOLE: Mutex<Option<SerialConsole>> = Mutex::new(None);
 
-pub fn init_serial_console(start_x: usize, start_y: usize) {
-    *SERIAL_CONSOLE.lock() = Some(SerialConsole::new(start_x, start_y));
+pub fn init_serial_console() {
+    *SERIAL_CONSOLE.lock() = Some(SerialConsole::new());
 }
 
 pub fn with_serial_console<F: FnOnce(&mut SerialConsole)>(f: F) {
