@@ -3,7 +3,7 @@ use heapless::spsc::{Consumer, Producer, Queue};
 use pc_keyboard::{DecodedKey, HandleControl, KeyState, Keyboard, ScancodeSet2, layouts};
 use static_cell::StaticCell;
 
-use crate::task::scheduler::{SCHEDULER, current_pid};
+use crate::task::scheduler::SCHEDULER;
 #[repr(C)]
 #[derive(Clone, Debug, Copy, Default)]
 pub struct KeyboardEvent {

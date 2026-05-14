@@ -1,12 +1,9 @@
 use crate::driver::graphics::font_render::render_text;
 use crate::driver::graphics::framebuffer::Framebuffer;
-use crate::{driver::graphics::base::rgb, util::serial_print};
+use crate::{arch::arch::safe_lock, driver::graphics::base::rgb};
 use alloc::string::String;
 use core::fmt::{self, Write};
 use spin::Mutex;
-
-#[cfg(target_arch = "x86_64")]
-use x86_64::instructions::interrupts::without_interrupts;
 
 pub struct ConsoleWriter<'a> {
     pub fb: &'a mut Framebuffer,
@@ -16,7 +13,6 @@ pub struct ConsoleWriter<'a> {
 
 impl Write for ConsoleWriter<'_> {
     fn write_str(&mut self, s: &str) -> fmt::Result {
-        serial_print(s);
         self.console.print(s, self.fb);
         Ok(())
     }
@@ -67,10 +63,10 @@ pub fn init_serial_console() {
 }
 
 pub fn with_serial_console<F: FnOnce(&mut SerialConsole)>(f: F) {
-    without_interrupts(|| {
+    safe_lock(|| {
         let mut guard = SERIAL_CONSOLE.lock();
-        if let Some(fb) = guard.as_mut() {
-            f(fb);
+        if let Some(sc) = guard.as_mut() {
+            f(sc);
         }
     });
 }

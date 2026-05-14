@@ -26,12 +26,10 @@ pub fn run_elf_x86_64(file_bytes: &[u8], should_swapgs: bool) {
             .spawn_process(entry_point as u64, stack_top, heap_base)
             .unwrap();
 
-        let mut frames: Vec<PhysFrame<Size4KiB>> = Vec::new();
         let mut frame_allocator = FRAME_ALLOCATOR.lock();
 
         for i in 0..page_count {
             let frame = frame_allocator.allocate_frame().unwrap();
-            frames.push(frame);
 
             let virt_addr = VirtAddr::new(stack_base + i as u64 * page_size);
             let page = Page::<Size4KiB>::containing_address(virt_addr);

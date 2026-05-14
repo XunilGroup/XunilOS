@@ -1,6 +1,7 @@
+use alloc::vec::Vec;
 use core::ptr::{null, null_mut};
 
-use alloc::vec::Vec;
+#[cfg(target_arch = "x86_64")]
 use x86_64::{
     VirtAddr,
     structures::paging::{
@@ -29,6 +30,7 @@ pub fn get_vaddr(phdr: *const Elf64Phdr, load_bias: u64) -> *mut u8 {
     unsafe { ((*phdr).p_vaddr + load_bias) as *mut u8 }
 }
 
+#[cfg(target_arch = "x86_64")]
 pub unsafe fn load_program(
     mapper: &mut OffsetPageTable,
     hdr: *const Elf64Ehdr,
@@ -53,6 +55,7 @@ pub unsafe fn load_program(
 
     if !pie {
         for program_header in program_headers {
+            #[cfg(target_arch = "x86_64")]
             load_segment_to_memory(mapper, program_header, elf_bytes, 0);
         }
 
@@ -95,6 +98,7 @@ pub unsafe fn load_program(
         }
 
         for program_header in program_headers {
+            #[cfg(target_arch = "x86_64")]
             load_segment_to_memory(mapper, program_header, elf_bytes, load_bias);
         }
 
@@ -275,6 +279,7 @@ fn parse_dyn(
     );
 }
 
+#[cfg(target_arch = "x86_64")]
 pub fn load_segment_to_memory(
     mapper: &mut OffsetPageTable,
     phdr: *const Elf64Phdr,

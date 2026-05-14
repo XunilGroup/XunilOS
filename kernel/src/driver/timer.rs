@@ -27,17 +27,6 @@ impl Timer {
     }
 
     pub fn interrupt(&self) {
-        let mut scheduler = without_interrupts(|| SCHEDULER.lock());
-        for process in scheduler.processes.values_mut() {
-            if let Some(wake_tick) = process.info.wake_tick {
-                if self.interrupt_count.load(Ordering::Relaxed) >= wake_tick {
-                    process.info.wake_tick = None;
-                    process.state = crate::task::process::ProcessState::Ready;
-                }
-            }
-        }
-        drop(scheduler);
-
         self.interrupt_count.fetch_add(1, Ordering::Relaxed);
     }
 

@@ -6,6 +6,7 @@ version = 4
 name = "XunilOS"
 version = "0.1.0"
 dependencies = [
+ "aarch64-cpu",
  "font8x8",
  "heapless",
  "lazy_static",
@@ -15,6 +16,15 @@ dependencies = [
  "spin 0.10.0",
  "static_cell",
  "x86_64",
+]
+
+[[package]]
+name = "aarch64-cpu"
+version = "11.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "44171e22925ec72b63d86747bc3655c7849a5b8d865c980222128839f45ac034"
+dependencies = [
+ "tock-registers",
 ]
 
 [[package]]
@@ -155,6 +165,12 @@ checksum = "0530892bb4fa575ee0da4b86f86c667132a94b74bb72160f58ee5a4afec74c23"
 dependencies = [
  "portable-atomic",
 ]
+
+[[package]]
+name = "tock-registers"
+version = "0.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8d2d250f87fb3fb6f225c907cf54381509f47b40b74b1d1f12d2dccbc915bdfe"
 
 [[package]]
 name = "volatile"

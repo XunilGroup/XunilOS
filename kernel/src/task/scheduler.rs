@@ -1,10 +1,9 @@
 use core::sync::atomic::{AtomicU64, Ordering};
 
 use alloc::{collections::btree_map::BTreeMap, vec::Vec};
-use x86_64::instructions::interrupts::without_interrupts;
 
 use crate::{
-    arch::arch::enter_usermode,
+    arch::arch::{enter_usermode, safe_lock},
     task::{
         context::UserContext,
         process::{Process, ProcessState},
@@ -43,7 +42,7 @@ impl Scheduler {
 
 impl Locked<Scheduler> {
     pub fn spawn_process(&self, entry_point: u64, stack_top: u64, heap_base: u64) -> Option<u64> {
-        let mut guard = without_interrupts(|| self.lock());
+        let mut guard = safe_lock(|| self.lock());
         let pid = guard.next_pid;
         guard.next_pid += 1;
         let process = Process::new(pid, entry_point, stack_top, heap_base, heap_base);
@@ -54,7 +53,7 @@ impl Locked<Scheduler> {
 
     pub fn next_task(&self) -> u64 {
         if let Some(previous_pid) = current_pid() {
-            let mut guard = without_interrupts(|| self.lock());
+            let mut guard = safe_lock(|| self.lock());
 
             if let Some(process) = guard.processes.get_mut(&previous_pid) {
                 if matches!(process.state, ProcessState::Running) {
@@ -87,9 +86,10 @@ impl Locked<Scheduler> {
         };
     }
 
+    #[cfg(target_arch = "x86_64")]
     pub fn switch_to(&self, pid: u64, should_swapgs: bool) {
         let (ctx_opt, entry, stack_top) = {
-            let mut guard = without_interrupts(|| self.lock());
+            let mut guard = safe_lock(|| self.lock());
 
             if let Some(previous_pid) = current_pid() {
                 if let Some(old_process) = guard.processes.get_mut(&previous_pid) {
@@ -128,7 +128,7 @@ impl Locked<Scheduler> {
     where
         F: FnOnce(&mut Process) -> R,
     {
-        let mut guard = without_interrupts(|| self.lock());
+        let mut guard = safe_lock(|| self.lock());
         let process = guard.processes.get_mut(&index)?;
         Some(f(process))
     }
@@ -136,6 +136,7 @@ impl Locked<Scheduler> {
 
 pub static SCHEDULER: Locked<Scheduler> = Locked::new(Scheduler::new());
 
+#[cfg(target_arch = "x86_64")]
 #[unsafe(naked)]
 #[unsafe(no_mangle)]
 unsafe fn run_next(ctx: *const UserContext, user_rsp: u64) {

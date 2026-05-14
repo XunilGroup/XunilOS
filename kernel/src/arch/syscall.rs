@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
 use alloc::vec;
+#[cfg(target_arch = "x86_64")]
 use x86_64::{
     PhysAddr, VirtAddr,
     instructions::interrupts,
@@ -15,13 +16,18 @@ use crate::{
         keyboard::{KeyboardEvent, process_scancodes},
         timer::TIMER,
     },
-    mm::usercopy::{copy_cstr_from_user, copy_to_user},
     print,
     task::{
         process::ProcessState,
         scheduler::{SCHEDULER, current_pid},
     },
     util::{align_down, align_up},
+};
+
+#[cfg(target_arch = "x86_64")]
+use crate::{
+    arch::arch::safe_lock,
+    mm::usercopy::{copy_cstr_from_user, copy_to_user},
 };
 
 const READ: usize = 0;
@@ -50,6 +56,7 @@ const SLEEP: usize = 909090; // zzz haha
 pub const MAP_FRAMEBUFFER: usize = 5555;
 pub const FRAMEBUFFER_SWAP: usize = 6666;
 
+#[cfg(target_arch = "x86_64")]
 fn map_framebuffer() -> isize {
     let pid = current_pid().unwrap_or(0);
     if pid == 0 {
@@ -107,6 +114,12 @@ fn map_framebuffer() -> isize {
         .unwrap_or(-1)
 }
 
+#[cfg(target_arch = "aarch64")]
+fn map_framebuffer() -> isize {
+    0
+}
+
+#[cfg(target_arch = "x86_64")]
 fn read(ptr: isize, size: isize, nmemb: isize, fd: isize) -> isize {
     let pid = current_pid().unwrap_or(0);
     if pid == 0 {
@@ -142,6 +155,12 @@ fn read(ptr: isize, size: isize, nmemb: isize, fd: isize) -> isize {
         .unwrap_or(-1)
 }
 
+#[cfg(target_arch = "aarch64")]
+fn read(ptr: isize, size: isize, nmemb: isize, fd: isize) -> isize {
+    0
+}
+
+#[cfg(target_arch = "x86_64")]
 fn open(path: isize, mode: isize) -> isize {
     let pid = current_pid().unwrap_or(0);
     if pid == 0 {
@@ -160,10 +179,16 @@ fn open(path: isize, mode: isize) -> isize {
         .unwrap_or(-1)
 }
 
+#[cfg(target_arch = "aarch64")]
+fn open(path: isize, mode: isize) -> isize {
+    0
+}
+
 fn close(fd: isize) -> isize {
     vfs_close(fd as i64) as isize
 }
 
+#[cfg(target_arch = "x86_64")]
 fn kbd_read(user_ptr: *mut KeyboardEvent, max_events: isize) -> isize {
     process_scancodes();
     if max_events <= 0 || user_ptr.is_null() {
@@ -198,6 +223,12 @@ fn kbd_read(user_ptr: *mut KeyboardEvent, max_events: isize) -> isize {
         .unwrap_or(-1);
 }
 
+#[cfg(target_arch = "aarch64")]
+fn kbd_read(user_ptr: *mut KeyboardEvent, max_events: isize) -> isize {
+    0
+}
+
+#[cfg(target_arch = "x86_64")]
 pub unsafe fn sbrk(increment: isize) -> isize {
     let pid = current_pid().unwrap_or(0);
 
@@ -205,9 +236,10 @@ pub unsafe fn sbrk(increment: isize) -> isize {
         return -1;
     }
 
-    let mut frame_allocator = FRAME_ALLOCATOR.lock();
     return SCHEDULER
         .with_process(pid as u64, |process| {
+            let mut frame_allocator = safe_lock(|| FRAME_ALLOCATOR.lock());
+
             let (heap_end, heap_base, stack_top) =
                 (process.heap_end, process.heap_base, process.stack_top);
 
@@ -223,8 +255,8 @@ pub unsafe fn sbrk(increment: isize) -> isize {
             if new < heap_base {
                 return -1;
             }
-            if new > stack_top - 16384 * 4096 {
-                // 67 mib max
+            if new > stack_top - 65535 * 4096 {
+                // 262 mib max
                 return -1;
             }
 
@@ -272,6 +304,12 @@ pub unsafe fn sbrk(increment: isize) -> isize {
         .unwrap_or(-1);
 }
 
+#[cfg(target_arch = "aarch64")]
+pub unsafe fn sbrk(increment: isize) -> isize {
+    0
+}
+
+#[cfg(target_arch = "x86_64")]
 pub fn exec(arg0: isize) -> isize {
     let pid = current_pid().unwrap_or(0);
     if pid == 0 {
@@ -336,6 +374,11 @@ pub fn exec(arg0: isize) -> isize {
     0
 }
 
+#[cfg(target_arch = "aarch64")]
+pub fn exec(arg0: isize) -> isize {
+    0
+}
+
 pub fn set_reschedule(should_reschedule: bool) {
     let pid = current_pid().unwrap_or(0);
 
@@ -352,6 +395,43 @@ pub fn set_reschedule(should_reschedule: bool) {
     drop(scheduler);
 }
 
+#[cfg(target_arch = "x86_64")]
+pub fn exit() -> isize {
+    let pid = current_pid().unwrap_or(0);
+    if pid == 0 {
+        return 0;
+    }
+
+    let next_pid = {
+        let mut sched = SCHEDULER.lock();
+
+        sched.processes.remove(&pid);
+
+        sched
+            .processes
+            .iter()
+            .find_map(|(other, proc)| {
+                if *other != pid && matches!(proc.state, ProcessState::Ready) {
+                    Some(*other)
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(0)
+    };
+
+    if next_pid != 0 {
+        SCHEDULER.switch_to(next_pid, false);
+    }
+
+    crate::arch::arch::infinite_idle();
+}
+
+#[cfg(target_arch = "aarch64")]
+pub fn exit() -> isize {
+    0
+}
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn syscall_dispatch(
     num: usize,
@@ -362,6 +442,7 @@ pub unsafe extern "C" fn syscall_dispatch(
     arg4: isize,
     arg5: isize,
 ) -> isize {
+    #[cfg(target_arch = "x86_64")]
     interrupts::enable();
 
     set_reschedule(match num {
@@ -405,36 +486,7 @@ pub unsafe extern "C" fn syscall_dispatch(
         OPEN => open(arg0, arg1),
         CLOSE => close(arg0),
         LSEEK => vfs_lseek(arg0 as i64, arg1 as i64, arg2 as i32) as isize,
-        EXIT => {
-            let pid = current_pid().unwrap_or(0);
-            if pid == 0 {
-                return 0;
-            }
-
-            let next_pid = {
-                let mut sched = SCHEDULER.lock();
-
-                sched.processes.remove(&pid);
-
-                sched
-                    .processes
-                    .iter()
-                    .find_map(|(other, proc)| {
-                        if *other != pid && matches!(proc.state, ProcessState::Ready) {
-                            Some(*other)
-                        } else {
-                            None
-                        }
-                    })
-                    .unwrap_or(0)
-            };
-
-            if next_pid != 0 {
-                SCHEDULER.switch_to(next_pid, false);
-            }
-
-            crate::arch::arch::infinite_idle();
-        }
+        EXIT => exit(),
         SLEEP => {
             sleep(arg0 as u64);
             0

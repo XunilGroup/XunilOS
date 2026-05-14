@@ -1,14 +1,14 @@
 #![no_std]
 #![no_main]
-#![feature(abi_x86_interrupt)]
+#![cfg_attr(target_arch = "x86_64", feature(abi_x86_interrupt))]
 #![feature(naked_functions_rustic_abi)]
 extern crate alloc;
 use core::fmt::Write;
 
 use limine::BaseRevision;
 use limine::request::{
-    DateAtBootRequest, FramebufferRequest, HhdmRequest, MemoryMapRequest, MpRequest,
-    RequestsEndMarker, RequestsStartMarker,
+    DateAtBootRequest, FramebufferRequest, HhdmRequest, MemoryMapRequest, RequestsEndMarker,
+    RequestsStartMarker,
 };
 pub mod arch;
 pub mod driver;
@@ -22,6 +22,7 @@ use crate::driver::graphics::framebuffer::{init_framebuffer, with_framebuffer};
 use crate::driver::keyboard::init_keyboard;
 use crate::driver::serial::{ConsoleWriter, init_serial_console, with_serial_console};
 use crate::driver::timer::TIMER;
+use crate::util::serial_print;
 
 #[repr(C, align(16))]
 struct AlignedElf([u8; include_bytes!("../../assets/init").len()]);
@@ -51,10 +52,6 @@ static MEMORY_MAP_REQUEST: MemoryMapRequest = MemoryMapRequest::new();
 #[used]
 #[unsafe(link_section = ".requests")]
 static DATE_AT_BOOT_REQUEST: DateAtBootRequest = DateAtBootRequest::new();
-
-#[used]
-#[unsafe(link_section = ".requests")]
-static MP_REQUEST: MpRequest = MpRequest::new();
 
 /// Define the stand and end markers for Limine requests.
 #[used]
@@ -114,6 +111,8 @@ unsafe extern "C" fn kmain() -> ! {
     if let Some(framebuffer_response) = FRAMEBUFFER_REQUEST.get_response() {
         if let Some(limine_framebuffer) = framebuffer_response.framebuffers().next() {
             init_framebuffer(&limine_framebuffer);
+            #[cfg(target_arch = "x86_64")]
+            with_framebuffer(|fb| fb.setup_x86_64());
         }
     }
 
@@ -127,6 +126,7 @@ unsafe extern "C" fn kmain() -> ! {
         println!("Could not get date at boot. Will default to 0.")
     }
 
+    #[cfg(target_arch = "x86_64")]
     run_elf(INIT_ELF_BYTES, false);
 
     loop {}
@@ -134,6 +134,12 @@ unsafe extern "C" fn kmain() -> ! {
 
 #[panic_handler]
 fn rust_panic(_info: &core::panic::PanicInfo) -> ! {
+    #[cfg(target_arch = "x86_64")]
+    {
+        serial_print("\nKERNEL PANIC:\n");
+        serial_print(_info.message().as_str().unwrap());
+        serial_print("\n");
+    }
     with_framebuffer(|mut fb| {
         fb.clear(rgb(180, 0, 0));
 

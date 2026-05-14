@@ -2,11 +2,14 @@ use alloc::{
     string::{String, ToString},
     vec::Vec,
 };
+
+#[cfg(target_arch = "x86_64")]
 use x86_64::{
     VirtAddr,
     structures::paging::{OffsetPageTable, PageTableFlags, Translate, mapper::TranslateResult},
 };
 
+#[cfg(target_arch = "x86_64")]
 pub fn copy_to_user(
     mapper: &mut OffsetPageTable,
     buf: *mut u8,
@@ -42,6 +45,7 @@ pub fn copy_to_user(
     Ok(())
 }
 
+#[cfg(target_arch = "x86_64")]
 pub fn copy_from_user(
     mapper: &mut OffsetPageTable,
     buf: *mut u8,
@@ -85,6 +89,7 @@ pub fn copy_from_user(
     Ok(())
 }
 
+#[cfg(target_arch = "x86_64")]
 pub fn copy_cstr_from_user(
     mapper: &mut OffsetPageTable,
     user_ptr: *const u8,

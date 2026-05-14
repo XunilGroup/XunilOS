@@ -1,3 +1,4 @@
+#[cfg(target_arch = "x86_64")]
 use x86_64::{
     PhysAddr, VirtAddr,
     registers::control::{Cr3, Cr3Flags},
@@ -6,10 +7,16 @@ use x86_64::{
 
 use crate::arch::arch::FRAME_ALLOCATOR;
 
+#[cfg(target_arch = "x86_64")]
 pub struct AddressSpace {
     cr3_frame: PhysFrame<Size4KiB>,
     pub mapper: OffsetPageTable<'static>,
 }
+
+#[cfg(target_arch = "aarch64")]
+pub struct AddressSpace {}
+
+#[cfg(target_arch = "x86_64")]
 impl AddressSpace {
     pub fn new() -> Option<AddressSpace> {
         let mut frame_allocator = FRAME_ALLOCATOR.lock();
@@ -58,6 +65,7 @@ impl AddressSpace {
     }
 }
 
+#[cfg(target_arch = "x86_64")]
 pub unsafe fn physical_to_virt_pointer(phys_addr: PhysAddr, hhdm_offset: u64) -> *mut u64 {
     (hhdm_offset + phys_addr.as_u64()) as *mut u64
 }

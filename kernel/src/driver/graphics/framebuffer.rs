@@ -1,11 +1,7 @@
 use limine::framebuffer::Framebuffer as LimineFramebuffer;
 use spin::Mutex;
 
-#[cfg(target_arch = "x86_64")]
-use x86_64::instructions::interrupts::without_interrupts;
-use x86_64::structures::paging::{FrameAllocator, PhysFrame, Size4KiB};
-
-use crate::arch::arch::FRAME_ALLOCATOR;
+use crate::arch::arch::safe_lock;
 
 #[repr(C)]
 pub struct UserFrameBuffer {
@@ -37,11 +33,35 @@ impl Framebuffer {
         let width = limine_fb.width() as usize;
         let height = limine_fb.height() as usize;
         let pitch = limine_fb.pitch() as usize / 4;
-        let buf_len = pitch * height;
+
+        Framebuffer {
+            addr: limine_fb.addr().cast::<u32>(),
+            width,
+            height,
+            pitch,
+            user_fb: UserFrameBuffer {
+                buf_virt: 0 as *mut u32,
+                width,
+                height,
+                pitch,
+            },
+            meta: FramebufferMeta {
+                buf_phys: 0,
+                buf_len: 0,
+                struct_phys: 0,
+            },
+        }
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    pub fn setup_x86_64(&mut self) {
+        use crate::arch::arch::FRAME_ALLOCATOR;
+        use x86_64::structures::paging::{FrameAllocator, PhysFrame, Size4KiB};
+        let buf_len = self.pitch * self.height;
         let byte_len = buf_len * core::mem::size_of::<u32>();
         let pixel_frames = (byte_len + 4095) / 4096;
 
-        let mut fa = FRAME_ALLOCATOR.lock();
+        let mut fa = safe_lock(|| FRAME_ALLOCATOR.lock());
 
         let struct_frame: PhysFrame<Size4KiB> =
             fa.allocate_frame().expect("framebuffer struct frame");
@@ -62,29 +82,16 @@ impl Framebuffer {
         unsafe {
             struct_virt.write(UserFrameBuffer {
                 buf_virt: (USER_FB_BASE + 0x1000) as *mut u32,
-                width,
-                height,
-                pitch,
+                width: self.width,
+                height: self.height,
+                pitch: self.pitch,
             });
-        }
+        };
 
-        Framebuffer {
-            addr: limine_fb.addr().cast::<u32>(),
-            width,
-            height,
-            pitch,
-            user_fb: UserFrameBuffer {
-                buf_virt: buf_virt_kernel,
-                width,
-                height,
-                pitch,
-            },
-            meta: FramebufferMeta {
-                buf_phys,
-                buf_len,
-                struct_phys,
-            },
-        }
+        self.user_fb.buf_virt = buf_virt_kernel;
+        self.meta.buf_phys = buf_phys;
+        self.meta.buf_len = buf_len;
+        self.meta.struct_phys = struct_phys;
     }
 
     #[inline(always)]
@@ -136,7 +143,7 @@ pub fn init_framebuffer(raw: &LimineFramebuffer) {
 }
 
 pub fn with_framebuffer<F: FnOnce(&mut Framebuffer)>(f: F) {
-    without_interrupts(|| {
+    safe_lock(|| {
         let mut guard = FRAMEBUFFER.lock();
         if let Some(fb) = guard.as_mut() {
             f(fb);
