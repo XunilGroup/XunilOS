@@ -1,4 +1,3 @@
-pub mod elf;
 pub mod gdt;
 pub mod heap;
 pub mod init;

@@ -1,16 +1,22 @@
-#![allow(dead_code)]
-
+#![allow(dead_code, unused_imports)]
+#[cfg(target_arch = "x86_64")]
+use crate::arch::x86_64::paging::create_and_map_multiple_pages;
 use alloc::vec;
 #[cfg(target_arch = "x86_64")]
 use x86_64::{
     PhysAddr, VirtAddr,
     instructions::interrupts,
-    structures::paging::{FrameAllocator, Mapper, Page, PageTableFlags, PhysFrame, Size4KiB},
+    structures::paging::{
+        FrameAllocator, Mapper, OffsetPageTable, Page, PageTableFlags, PhysFrame, Size4KiB,
+    },
 };
 
+#[cfg(target_arch = "aarch64")]
+use crate::arch::aarch64::paging::AArchPageTable;
 use crate::{
-    arch::arch::{FRAME_ALLOCATOR, run_elf, sleep},
+    arch::arch::{FRAME_ALLOCATOR, sleep},
     driver::{
+        elf::loader::run_elf,
         fs::vfs::{vfs_close, vfs_lseek, vfs_open, vfs_read},
         graphics::framebuffer::{FRAMEBUFFER, USER_FB_BASE, with_framebuffer},
         keyboard::{KeyboardEvent, process_scancodes},
@@ -24,7 +30,6 @@ use crate::{
     util::{align_down, align_up},
 };
 
-#[cfg(target_arch = "x86_64")]
 use crate::{
     arch::arch::safe_lock,
     mm::usercopy::{copy_cstr_from_user, copy_to_user},
@@ -56,7 +61,12 @@ const SLEEP: usize = 909090; // zzz haha
 pub const MAP_FRAMEBUFFER: usize = 5555;
 pub const FRAMEBUFFER_SWAP: usize = 6666;
 
+#[cfg(target_arch = "aarch64")]
+type PageTable = AArchPageTable;
+
 #[cfg(target_arch = "x86_64")]
+type PageTable<'a> = OffsetPageTable<'a>;
+
 fn map_framebuffer() -> isize {
     let pid = current_pid().unwrap_or(0);
     if pid == 0 {
@@ -76,18 +86,20 @@ fn map_framebuffer() -> isize {
     let pixel_map_end = align_up(buf_phys + buf_size, 4096);
     drop(framebuffer);
 
-    let mut frame_allocator = FRAME_ALLOCATOR.lock();
-
     SCHEDULER
         .with_process(pid, |process| {
             let address_space = match process.address_space.as_mut() {
                 Some(a) => a,
                 None => return -1,
             };
-
+            #[allow(dead_code, unused_mut, unused_variables)]
+            let mut map_page = |virt: u64, phys: u64| {};
+            #[cfg(target_arch = "x86_64")]
             let mut map_page = |virt: u64, phys: u64| unsafe {
                 let frame = PhysFrame::<Size4KiB>::containing_address(PhysAddr::new(phys));
                 let page = Page::<Size4KiB>::containing_address(VirtAddr::new(virt));
+                let mut frame_allocator = FRAME_ALLOCATOR.lock();
+
                 address_space
                     .mapper
                     .map_to(
@@ -101,6 +113,14 @@ fn map_framebuffer() -> isize {
                     )
                     .unwrap()
                     .flush();
+
+                drop(frame_allocator);
+            };
+            #[cfg(target_arch = "aarch64")]
+            let map_page = |virt: u64, phys: u64| {
+                use crate::arch::aarch64::paging::user_data_flags;
+
+                address_space.mapper.map_page(virt, phys, user_data_flags());
             };
 
             map_page(USER_FB_BASE, struct_phys);
@@ -114,12 +134,6 @@ fn map_framebuffer() -> isize {
         .unwrap_or(-1)
 }
 
-#[cfg(target_arch = "aarch64")]
-fn map_framebuffer() -> isize {
-    0
-}
-
-#[cfg(target_arch = "x86_64")]
 fn read(ptr: isize, size: isize, nmemb: isize, fd: isize) -> isize {
     let pid = current_pid().unwrap_or(0);
     if pid == 0 {
@@ -155,12 +169,6 @@ fn read(ptr: isize, size: isize, nmemb: isize, fd: isize) -> isize {
         .unwrap_or(-1)
 }
 
-#[cfg(target_arch = "aarch64")]
-fn read(ptr: isize, size: isize, nmemb: isize, fd: isize) -> isize {
-    0
-}
-
-#[cfg(target_arch = "x86_64")]
 fn open(path: isize, mode: isize) -> isize {
     let pid = current_pid().unwrap_or(0);
     if pid == 0 {
@@ -179,16 +187,10 @@ fn open(path: isize, mode: isize) -> isize {
         .unwrap_or(-1)
 }
 
-#[cfg(target_arch = "aarch64")]
-fn open(path: isize, mode: isize) -> isize {
-    0
-}
-
 fn close(fd: isize) -> isize {
     vfs_close(fd as i64) as isize
 }
 
-#[cfg(target_arch = "x86_64")]
 fn kbd_read(user_ptr: *mut KeyboardEvent, max_events: isize) -> isize {
     process_scancodes();
     if max_events <= 0 || user_ptr.is_null() {
@@ -223,12 +225,6 @@ fn kbd_read(user_ptr: *mut KeyboardEvent, max_events: isize) -> isize {
         .unwrap_or(-1);
 }
 
-#[cfg(target_arch = "aarch64")]
-fn kbd_read(user_ptr: *mut KeyboardEvent, max_events: isize) -> isize {
-    0
-}
-
-#[cfg(target_arch = "x86_64")]
 pub unsafe fn sbrk(increment: isize) -> isize {
     let pid = current_pid().unwrap_or(0);
 
@@ -238,8 +234,6 @@ pub unsafe fn sbrk(increment: isize) -> isize {
 
     return SCHEDULER
         .with_process(pid as u64, |process| {
-            let mut frame_allocator = safe_lock(|| FRAME_ALLOCATOR.lock());
-
             let (heap_end, heap_base, stack_top) =
                 (process.heap_end, process.heap_base, process.stack_top);
 
@@ -262,40 +256,35 @@ pub unsafe fn sbrk(increment: isize) -> isize {
 
             if new > old {
                 let map_start = align_up(old, 4096);
-                let map_end = align_up(new, 4096);
+                let page_count = (align_up(new, 4096) - map_start) / 4096;
+                if let Some(address_space) = process.address_space.as_mut() {
+                    #[cfg(target_arch = "x86_64")]
+                    create_and_map_multiple_pages(
+                        &mut address_space.mapper,
+                        page_count,
+                        map_start,
+                        PageTableFlags::PRESENT
+                            | PageTableFlags::WRITABLE
+                            | PageTableFlags::USER_ACCESSIBLE
+                            | PageTableFlags::NO_EXECUTE,
+                    );
+                    #[cfg(target_arch = "aarch64")]
+                    {
+                        use crate::arch::aarch64::paging::{
+                            create_and_map_multiple_pages, user_data_flags,
+                        };
 
-                for addr in (map_start..map_end).step_by(4096) {
-                    if let Some(frame) = frame_allocator.allocate_frame() {
-                        // TODO: do not use x86_64 only
-                        let virt_addr = VirtAddr::new(addr);
-                        let page = Page::<Size4KiB>::containing_address(virt_addr);
-                        if let Some(address_space) = process.address_space.as_mut() {
-                            unsafe {
-                                address_space
-                                    .mapper
-                                    .map_to(
-                                        page,
-                                        frame,
-                                        PageTableFlags::PRESENT
-                                            | PageTableFlags::WRITABLE
-                                            | PageTableFlags::USER_ACCESSIBLE
-                                            | PageTableFlags::NO_EXECUTE,
-                                        &mut *frame_allocator,
-                                    )
-                                    .unwrap()
-                                    .flush();
-
-                                core::ptr::write_bytes(virt_addr.as_mut_ptr::<u8>(), 0, 4096);
-                            }
-                        } else {
-                            return -1;
-                        }
-                    } else {
-                        return -1;
+                        create_and_map_multiple_pages(
+                            &mut address_space.mapper,
+                            page_count,
+                            map_start,
+                            user_data_flags(),
+                        );
                     }
+                } else {
+                    return -1;
                 }
             }
-            drop(frame_allocator);
 
             process.heap_end = new;
 
@@ -304,12 +293,6 @@ pub unsafe fn sbrk(increment: isize) -> isize {
         .unwrap_or(-1);
 }
 
-#[cfg(target_arch = "aarch64")]
-pub unsafe fn sbrk(increment: isize) -> isize {
-    0
-}
-
-#[cfg(target_arch = "x86_64")]
 pub fn exec(arg0: isize) -> isize {
     let pid = current_pid().unwrap_or(0);
     if pid == 0 {
@@ -374,11 +357,6 @@ pub fn exec(arg0: isize) -> isize {
     0
 }
 
-#[cfg(target_arch = "aarch64")]
-pub fn exec(arg0: isize) -> isize {
-    0
-}
-
 pub fn set_reschedule(should_reschedule: bool) {
     let pid = current_pid().unwrap_or(0);
 
@@ -395,7 +373,6 @@ pub fn set_reschedule(should_reschedule: bool) {
     drop(scheduler);
 }
 
-#[cfg(target_arch = "x86_64")]
 pub fn exit() -> isize {
     let pid = current_pid().unwrap_or(0);
     if pid == 0 {
@@ -427,11 +404,7 @@ pub fn exit() -> isize {
     crate::arch::arch::infinite_idle();
 }
 
-#[cfg(target_arch = "aarch64")]
-pub fn exit() -> isize {
-    0
-}
-
+#[allow(unused_variables)]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn syscall_dispatch(
     num: usize,

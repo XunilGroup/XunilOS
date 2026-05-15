@@ -9,45 +9,65 @@ use x86_64::{
     structures::paging::{OffsetPageTable, PageTableFlags, Translate, mapper::TranslateResult},
 };
 
+#[cfg(target_arch = "aarch64")]
+use crate::arch::aarch64::paging::AArchPageTable;
+
+#[cfg(target_arch = "aarch64")]
+type PageTable = AArchPageTable;
+
 #[cfg(target_arch = "x86_64")]
+type PageTable<'a> = OffsetPageTable<'a>;
+
+#[allow(unused_variables)]
 pub fn copy_to_user(
-    mapper: &mut OffsetPageTable,
+    mapper: &mut PageTable,
     buf: *mut u8,
     src: *const u8,
     len: usize,
 ) -> Result<(), isize> {
     let start = buf as u64;
     let end = start + len as u64;
+    #[allow(unused_mut)]
     let mut page_addr = start & !0xFFF;
 
-    while page_addr < end {
-        let translate_result = mapper.translate(VirtAddr::new(page_addr));
-        #[allow(non_shorthand_field_patterns)]
-        if let TranslateResult::Mapped {
-            frame: _,
-            offset: _,
-            flags: flags,
-        } = translate_result
-        {
-            if flags.contains(PageTableFlags::USER_ACCESSIBLE)
-                && flags.contains(PageTableFlags::WRITABLE)
+    #[cfg(target_arch = "x86_64")]
+    {
+        while page_addr < end {
+            let translate_result = mapper.translate(VirtAddr::new(page_addr));
+            #[allow(non_shorthand_field_patterns)]
+            if let TranslateResult::Mapped {
+                frame: _,
+                offset: _,
+                flags: flags,
+            } = translate_result
             {
+                if flags.contains(PageTableFlags::USER_ACCESSIBLE)
+                    && flags.contains(PageTableFlags::WRITABLE)
+                {
+                } else {
+                    return Err(-13);
+                }
             } else {
-                return Err(-13);
+                return Err(-1);
             }
-        } else {
-            return Err(-1);
+            page_addr += 0x1000;
         }
-        page_addr += 0x1000;
+
+        unsafe { core::ptr::copy_nonoverlapping(src, buf, len) };
     }
 
-    unsafe { core::ptr::copy_nonoverlapping(src, buf, len) };
+    #[cfg(target_arch = "aarch64")]
+    {
+        // TODO: add checks
+        unsafe { core::ptr::copy_nonoverlapping(src, buf, len) };
+    }
+
     Ok(())
 }
 
-#[cfg(target_arch = "x86_64")]
+#[allow(unused_variables)]
 pub fn copy_from_user(
-    mapper: &mut OffsetPageTable,
+    mapper: &mut PageTable,
     buf: *mut u8,
     src: *const u8,
     len: usize,
@@ -64,34 +84,43 @@ pub fn copy_from_user(
         .checked_add(len as u64)
         .ok_or(-1)
         .map_err(|err| err as isize)?;
-
+    #[allow(unused_mut)]
     let mut page_addr = start & !0xFFF;
 
-    while page_addr < end {
-        let translate_result = mapper.translate(VirtAddr::new(page_addr));
-        #[allow(non_shorthand_field_patterns)]
-        if let TranslateResult::Mapped {
-            frame: _,
-            offset: _,
-            flags: flags,
-        } = translate_result
-        {
-            if !flags.contains(PageTableFlags::USER_ACCESSIBLE) {
-                return Err(-13);
+    #[cfg(target_arch = "x86_64")]
+    {
+        while page_addr < end {
+            let translate_result = mapper.translate(VirtAddr::new(page_addr));
+            #[allow(non_shorthand_field_patterns)]
+            if let TranslateResult::Mapped {
+                frame: _,
+                offset: _,
+                flags: flags,
+            } = translate_result
+            {
+                if !flags.contains(PageTableFlags::USER_ACCESSIBLE) {
+                    return Err(-13);
+                }
+            } else {
+                return Err(-1);
             }
-        } else {
-            return Err(-1);
+            page_addr += 0x1000;
         }
-        page_addr += 0x1000;
+
+        unsafe { core::ptr::copy_nonoverlapping(src, buf, len) };
     }
 
-    unsafe { core::ptr::copy_nonoverlapping(src, buf, len) };
+    #[cfg(target_arch = "aarch64")]
+    {
+        // TODO: add checks
+        unsafe { core::ptr::copy_nonoverlapping(src, buf, len) };
+    }
+
     Ok(())
 }
 
-#[cfg(target_arch = "x86_64")]
 pub fn copy_cstr_from_user(
-    mapper: &mut OffsetPageTable,
+    mapper: &mut PageTable,
     user_ptr: *const u8,
     max_len: usize,
 ) -> Result<String, isize> {

@@ -33,7 +33,6 @@ impl Framebuffer {
         let width = limine_fb.width() as usize;
         let height = limine_fb.height() as usize;
         let pitch = limine_fb.pitch() as usize / 4;
-
         Framebuffer {
             addr: limine_fb.addr().cast::<u32>(),
             width,
@@ -55,7 +54,7 @@ impl Framebuffer {
 
     #[cfg(target_arch = "x86_64")]
     pub fn setup_x86_64(&mut self) {
-        use crate::arch::arch::FRAME_ALLOCATOR;
+        use crate::arch::arch::{FRAME_ALLOCATOR, HHDM_OFFSET};
         use x86_64::structures::paging::{FrameAllocator, PhysFrame, Size4KiB};
         let buf_len = self.pitch * self.height;
         let byte_len = buf_len * core::mem::size_of::<u32>();
@@ -66,7 +65,8 @@ impl Framebuffer {
         let struct_frame: PhysFrame<Size4KiB> =
             fa.allocate_frame().expect("framebuffer struct frame");
         let struct_phys = struct_frame.start_address().as_u64();
-        let struct_virt = (struct_phys + fa.hhdm_offset) as *mut UserFrameBuffer;
+        let hhdm_offset = HHDM_OFFSET.load(core::sync::atomic::Ordering::Relaxed);
+        let struct_virt = (struct_phys + hhdm_offset) as *mut UserFrameBuffer;
 
         let first_pixel_frame: PhysFrame<Size4KiB> =
             fa.allocate_frame().expect("framebuffer pixel frame 0");
@@ -74,7 +74,44 @@ impl Framebuffer {
         for _ in 1..pixel_frames {
             fa.allocate_frame().expect("framebuffer pixel frame");
         }
-        let buf_virt_kernel = (buf_phys + fa.hhdm_offset) as *mut u32;
+        let buf_virt_kernel = (buf_phys + hhdm_offset) as *mut u32;
+        drop(fa);
+
+        unsafe { core::ptr::write_bytes(buf_virt_kernel, 0, buf_len) };
+
+        unsafe {
+            struct_virt.write(UserFrameBuffer {
+                buf_virt: (USER_FB_BASE + 0x1000) as *mut u32,
+                width: self.width,
+                height: self.height,
+                pitch: self.pitch,
+            });
+        };
+
+        self.user_fb.buf_virt = buf_virt_kernel;
+        self.meta.buf_phys = buf_phys;
+        self.meta.buf_len = buf_len;
+        self.meta.struct_phys = struct_phys;
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    pub fn setup_aarch64(&mut self) {
+        let hhdm_offset = HHDM_OFFSET.load(core::sync::atomic::Ordering::Relaxed);
+        use crate::arch::arch::{FRAME_ALLOCATOR, HHDM_OFFSET};
+        let buf_len = self.pitch * self.height;
+        let byte_len = buf_len * core::mem::size_of::<u32>();
+        let pixel_frames = (byte_len + 4095) / 4096;
+
+        let mut fa = safe_lock(|| FRAME_ALLOCATOR.lock());
+
+        let struct_phys: u64 = fa.allocate_frame().expect("framebuffer struct frame");
+        let struct_virt = (struct_phys + hhdm_offset) as *mut UserFrameBuffer;
+
+        let buf_phys: u64 = fa.allocate_frame().expect("framebuffer pixel frame 0");
+        for _ in 1..pixel_frames {
+            fa.allocate_frame().expect("framebuffer pixel frame");
+        }
+        let buf_virt_kernel = (buf_phys + hhdm_offset) as *mut u32;
         drop(fa);
 
         unsafe { core::ptr::write_bytes(buf_virt_kernel, 0, buf_len) };

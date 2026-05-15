@@ -1,6 +1,13 @@
 use alloc::vec::Vec;
 use core::ptr::{null, null_mut};
 
+#[cfg(target_arch = "aarch64")]
+#[allow(unused_imports)]
+use crate::arch::aarch64::paging::{
+    AArchPageTable, UXN, create_and_map_multiple_pages, user_code_flags,
+};
+
+#[allow(unused_imports)]
 #[cfg(target_arch = "x86_64")]
 use x86_64::{
     VirtAddr,
@@ -9,13 +16,18 @@ use x86_64::{
     },
 };
 
+#[allow(unused_imports)]
+#[cfg(target_arch = "x86_64")]
+use crate::arch::x86_64::paging::create_and_map_multiple_pages;
+#[allow(unused_imports)]
 use crate::{
     arch::arch::FRAME_ALLOCATOR,
     driver::elf::header::{
         DT_JMPREL, DT_NEEDED, DT_NULL, DT_PLTREL, DT_PLTRELSZ, DT_RELA, DT_RELASZ, DT_STRSZ,
         DT_STRTAB, DT_SYMTAB, Elf64Dyn, Elf64Ehdr, Elf64Phdr, Elf64Rela, Elf64Sym, PF_X,
-        PT_DYNAMIC, PT_LOAD, R_X86_64_64, R_X86_64_GLOB_DAT, R_X86_64_JUMP_SLOT, R_X86_64_NONE,
-        R_X86_64_RELATIVE, SHN_UNDEF, STB_WEAK,
+        PT_DYNAMIC, PT_LOAD, R_AARCH64_ABS64, R_AARCH64_GLOB_DAT, R_AARCH64_JUMP_SLOT,
+        R_AARCH64_NONE, R_AARCH64_RELATIVE, R_X86_64_64, R_X86_64_GLOB_DAT, R_X86_64_JUMP_SLOT,
+        R_X86_64_NONE, R_X86_64_RELATIVE, SHN_UNDEF, STB_WEAK,
     },
     util::{align_down, align_up},
 };
@@ -30,9 +42,14 @@ pub fn get_vaddr(phdr: *const Elf64Phdr, load_bias: u64) -> *mut u8 {
     unsafe { ((*phdr).p_vaddr + load_bias) as *mut u8 }
 }
 
+#[cfg(target_arch = "aarch64")]
+type PageTable = AArchPageTable;
+
 #[cfg(target_arch = "x86_64")]
+type PageTable<'a> = OffsetPageTable<'a>;
+
 pub unsafe fn load_program(
-    mapper: &mut OffsetPageTable,
+    mapper: &mut PageTable,
     hdr: *const Elf64Ehdr,
     elf_bytes: &[u8],
     pie: bool,
@@ -55,7 +72,6 @@ pub unsafe fn load_program(
 
     if !pie {
         for program_header in program_headers {
-            #[cfg(target_arch = "x86_64")]
             load_segment_to_memory(mapper, program_header, elf_bytes, 0);
         }
 
@@ -74,7 +90,7 @@ pub unsafe fn load_program(
             align_up(highest_seg as u64, 4096),
         );
     } else {
-        let base_address = 0x0000_0100_0000; // TODO: add per-process memory
+        let base_address = 0x0000_0100_0000;
         let min_vaddr = align_down(
             program_headers
                 .iter()
@@ -98,7 +114,6 @@ pub unsafe fn load_program(
         }
 
         for program_header in program_headers {
-            #[cfg(target_arch = "x86_64")]
             load_segment_to_memory(mapper, program_header, elf_bytes, load_bias);
         }
 
@@ -124,30 +139,7 @@ pub unsafe fn load_program(
     }
 }
 
-// fn cstr_from_strtab(
-//     strtab_ptr: *const u8,
-//     strtab_size: u64,
-//     off: u32,
-// ) -> Option<&'static core::ffi::CStr> {
-//     let off = off as u64;
-//     if strtab_ptr.is_null() || off >= strtab_size {
-//         return None;
-//     }
-
-//     let mut i = off;
-
-//     while i < strtab_size {
-//         let b = unsafe { *strtab_ptr.add(i as usize) };
-//         if b == 0 {
-//             let start = unsafe { strtab_ptr.add(off as usize) } as *const core::ffi::c_char;
-//             return Some(unsafe { CStr::from_ptr(start as *const i8) });
-//         }
-//         i += 1;
-//     }
-
-//     None
-// }
-
+#[allow(unused_variables)]
 pub fn dyn_get_symaddr(
     strtab_ptr: *const u8,
     strtab_size: u64,
@@ -160,12 +152,11 @@ pub fn dyn_get_symaddr(
         return Ok(load_bias + sym.st_value);
     }
 
-    // let name = cstr_from_strtab(strtab_ptr, strtab_size, idx as u32);
-
     let bind = sym.st_info >> 4;
     if bind == STB_WEAK { Ok(0) } else { Err(()) }
 }
 
+#[allow(unused_variables)]
 fn apply_relocations(
     hdr: *const Elf64Ehdr,
     rela_ptr: *mut Elf64Rela,
@@ -178,12 +169,13 @@ fn apply_relocations(
     for i in 0..rela_table_size as usize / size_of::<Elf64Rela>() {
         let rela_ptr = unsafe { rela_ptr.add(i) };
         let ptr = unsafe { (load_bias + (*rela_ptr).r_offset) as *mut u64 };
+        #[allow(unused_assignments)]
         let mut value: u64 = 0;
         match unsafe { ((*rela_ptr).r_info & 0xffff_ffff) as u32 } {
-            x if x == R_X86_64_RELATIVE as u32 => unsafe {
+            x if x == R_X86_64_RELATIVE || x == R_AARCH64_RELATIVE => unsafe {
                 value = (load_bias as i64 + (*rela_ptr).r_addend) as u64;
             },
-            x if x == R_X86_64_64 as u32 => unsafe {
+            x if x == R_X86_64_64 || x == R_AARCH64_ABS64 => unsafe {
                 value = (dyn_get_symaddr(
                     strtab_ptr,
                     strtab_size,
@@ -194,7 +186,14 @@ fn apply_relocations(
                 .unwrap() as i64
                     + (*rela_ptr).r_addend) as u64;
             },
-            x if [R_X86_64_GLOB_DAT, R_X86_64_JUMP_SLOT].contains(&x) => unsafe {
+            x if [
+                R_X86_64_GLOB_DAT,
+                R_X86_64_JUMP_SLOT,
+                R_AARCH64_GLOB_DAT,
+                R_AARCH64_JUMP_SLOT,
+            ]
+            .contains(&x) =>
+            unsafe {
                 value = dyn_get_symaddr(
                     strtab_ptr,
                     strtab_size,
@@ -204,7 +203,7 @@ fn apply_relocations(
                 )
                 .unwrap() as u64;
             },
-            x if x == R_X86_64_NONE as u32 => {
+            x if x == R_X86_64_NONE || x == R_AARCH64_NONE => {
                 continue; // explicitly do nothing
             }
             _ => {
@@ -279,9 +278,8 @@ fn parse_dyn(
     );
 }
 
-#[cfg(target_arch = "x86_64")]
 pub fn load_segment_to_memory(
-    mapper: &mut OffsetPageTable,
+    mapper: &mut PageTable,
     phdr: *const Elf64Phdr,
     elf_bytes: &[u8],
     load_bias: u64,
@@ -300,40 +298,38 @@ pub fn load_segment_to_memory(
 
     let vaddr: u64 = get_vaddr(phdr, load_bias) as u64;
     let mem_page: u64 = align_down(vaddr, PAGE_SIZE);
-    let file_page: u64 = align_down(p_offset, PAGE_SIZE);
     let page_off: u64 = vaddr - mem_page;
 
     let seg_start = mem_page;
     let seg_end = align_up(vaddr + mem_size, PAGE_SIZE);
 
-    let mut flags =
-        PageTableFlags::PRESENT | PageTableFlags::USER_ACCESSIBLE | PageTableFlags::WRITABLE;
+    #[cfg(target_arch = "x86_64")]
+    {
+        let mut flags =
+            PageTableFlags::PRESENT | PageTableFlags::USER_ACCESSIBLE | PageTableFlags::WRITABLE;
 
-    if unsafe { ((*phdr).p_flags & PF_X) == 0 } {
-        flags |= PageTableFlags::NO_EXECUTE;
-    }
-
-    let start_page: Page<Size4KiB> = Page::containing_address(VirtAddr::new(seg_start));
-    let end_page: Page<Size4KiB> = Page::containing_address(VirtAddr::new(seg_end - 1));
-    let page_range = Page::range_inclusive(start_page, end_page);
-
-    let mut frame_allocator = FRAME_ALLOCATOR.lock();
-
-    for page in page_range {
-        let frame = frame_allocator
-            .allocate_frame()
-            .ok_or(MapToError::<Size4KiB>::FrameAllocationFailed)
-            .expect("test");
-        unsafe {
-            mapper
-                .map_to(page, frame, flags, &mut *frame_allocator)
-                .map_err(|e| e)
-                .expect("test")
-                .flush();
+        if unsafe { ((*phdr).p_flags & PF_X) == 0 } {
+            flags |= PageTableFlags::NO_EXECUTE;
         }
-    }
 
-    drop(frame_allocator);
+        let map_start = seg_start;
+        let page_count = (seg_end - seg_start) / 4096;
+
+        create_and_map_multiple_pages(mapper, page_count, map_start, flags);
+    }
+    #[cfg(target_arch = "aarch64")]
+    {
+        let mut flags = user_code_flags();
+
+        if unsafe { ((*phdr).p_flags & PF_X) == 0 } {
+            flags |= UXN;
+        }
+
+        let map_start = seg_start;
+        let page_count = (seg_end - seg_start) / 4096;
+
+        create_and_map_multiple_pages(mapper, page_count, map_start, flags);
+    }
 
     let dst = (mem_page + page_off) as *mut u8;
     let src = unsafe { elf_bytes.as_ptr().add(p_offset as usize) };

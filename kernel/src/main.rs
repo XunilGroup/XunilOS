@@ -7,8 +7,8 @@ use core::fmt::Write;
 
 use limine::BaseRevision;
 use limine::request::{
-    DateAtBootRequest, FramebufferRequest, HhdmRequest, MemoryMapRequest, RequestsEndMarker,
-    RequestsStartMarker,
+    DateAtBootRequest, ExecutableAddressRequest, FramebufferRequest, HhdmRequest, MemoryMapRequest,
+    RequestsEndMarker, RequestsStartMarker,
 };
 pub mod arch;
 pub mod driver;
@@ -16,17 +16,23 @@ pub mod mm;
 pub mod task;
 pub mod util;
 
-use crate::arch::arch::{infinite_idle, init, kernel_crash, run_elf};
+use crate::arch::arch::{HHDM_OFFSET, infinite_idle, init, kernel_crash, serial_print};
+#[cfg(target_arch = "x86_64")]
+use crate::driver::elf::loader::run_elf;
 use crate::driver::graphics::base::rgb;
 use crate::driver::graphics::framebuffer::{init_framebuffer, with_framebuffer};
+#[cfg(target_arch = "aarch64")]
+use crate::driver::graphics::primitives::rectangle_filled;
 use crate::driver::keyboard::init_keyboard;
 use crate::driver::serial::{ConsoleWriter, init_serial_console, with_serial_console};
 use crate::driver::timer::TIMER;
-use crate::util::serial_print;
 
 #[repr(C, align(16))]
+#[allow(dead_code)]
 struct AlignedElf([u8; include_bytes!("../../assets/init").len()]);
+#[allow(dead_code)]
 static INIT_ELF: AlignedElf = AlignedElf(*include_bytes!("../../assets/init"));
+#[allow(dead_code)]
 static INIT_ELF_BYTES: &[u8] = &INIT_ELF.0;
 
 /// Sets the base revision to the latest revision supported by the crate.
@@ -52,6 +58,10 @@ static MEMORY_MAP_REQUEST: MemoryMapRequest = MemoryMapRequest::new();
 #[used]
 #[unsafe(link_section = ".requests")]
 static DATE_AT_BOOT_REQUEST: DateAtBootRequest = DateAtBootRequest::new();
+
+#[used]
+#[unsafe(link_section = ".requests")]
+static EXECUTABLE_ADDRESS_REQUEST: ExecutableAddressRequest = ExecutableAddressRequest::new();
 
 /// Define the stand and end markers for Limine requests.
 #[used]
@@ -99,8 +109,24 @@ unsafe extern "C" fn kmain() -> ! {
     assert!(BASE_REVISION.is_supported());
 
     if let Some(hhdm_response) = HHDM_REQUEST.get_response() {
+        HHDM_OFFSET.store(
+            hhdm_response.offset(),
+            core::sync::atomic::Ordering::Relaxed,
+        );
         if let Some(memory_map_response) = MEMORY_MAP_REQUEST.get_response() {
+            #[cfg(target_arch = "x86_64")]
             init(hhdm_response, memory_map_response);
+
+            #[cfg(target_arch = "aarch64")]
+            if let Some(executable_address_response) = EXECUTABLE_ADDRESS_REQUEST.get_response() {
+                init(
+                    hhdm_response,
+                    memory_map_response,
+                    executable_address_response,
+                );
+            } else {
+                kernel_crash()
+            }
         } else {
             kernel_crash(); // Could not get required info from Limine's memory map.
         }
@@ -113,6 +139,10 @@ unsafe extern "C" fn kmain() -> ! {
             init_framebuffer(&limine_framebuffer);
             #[cfg(target_arch = "x86_64")]
             with_framebuffer(|fb| fb.setup_x86_64());
+            #[cfg(target_arch = "aarch64")]
+            with_framebuffer(|fb| fb.setup_aarch64());
+        } else {
+            serial_print("no framebuffers found");
         }
     }
 
@@ -126,20 +156,56 @@ unsafe extern "C" fn kmain() -> ! {
         println!("Could not get date at boot. Will default to 0.")
     }
 
+    #[cfg(target_arch = "aarch64")]
+    {
+        println!("Hello from Aarch64!");
+        with_framebuffer(|fb| {
+            with_serial_console(|sc| sc.render(fb));
+            rectangle_filled(fb, 100, 100, 20, 20, rgb(255, 255, 255));
+            fb.present();
+        });
+    }
+
     #[cfg(target_arch = "x86_64")]
     run_elf(INIT_ELF_BYTES, false);
 
     loop {}
 }
 
+struct BufWriter<'a> {
+    buf: &'a mut [u8],
+    pos: usize,
+}
+
+impl<'a> BufWriter<'a> {
+    fn new(buf: &'a mut [u8]) -> Self {
+        Self { buf, pos: 0 }
+    }
+}
+
+impl core::fmt::Write for BufWriter<'_> {
+    fn write_str(&mut self, s: &str) -> core::fmt::Result {
+        let bytes = s.as_bytes();
+        let remaining = &mut self.buf[self.pos..];
+        let len = bytes.len().min(remaining.len());
+        remaining[..len].copy_from_slice(&bytes[..len]);
+        self.pos += len;
+        Ok(())
+    }
+}
+
 #[panic_handler]
 fn rust_panic(_info: &core::panic::PanicInfo) -> ! {
-    #[cfg(target_arch = "x86_64")]
-    {
-        serial_print("\nKERNEL PANIC:\n");
-        serial_print(_info.message().as_str().unwrap());
-        serial_print("\n");
-    }
+    serial_print("\nKERNEL PANIC:\n");
+    let mut buf = [0u8; 512];
+    let msg = {
+        let mut w = BufWriter::new(&mut buf);
+        let _ = core::fmt::write(&mut w, core::format_args!("{}", _info.message()));
+        let len = w.pos;
+        core::str::from_utf8(&buf[..len]).unwrap_or("(utf8 error)")
+    };
+    serial_print(msg);
+    serial_print("\n");
     with_framebuffer(|mut fb| {
         fb.clear(rgb(180, 0, 0));
 

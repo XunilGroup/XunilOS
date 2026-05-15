@@ -141,6 +141,7 @@ pub fn vfs_close(fd: Fd) -> i32 {
 }
 
 #[unsafe(no_mangle)]
+#[allow(unused_variables)]
 pub fn vfs_write(ptr: *mut u8, size: usize, count: usize, fp: *mut FILE) -> usize {
     if ptr.is_null() || fp.is_null() || unsafe { (*fp).fd < 0 || (*fp).fd >= 16 } {
         return 0;

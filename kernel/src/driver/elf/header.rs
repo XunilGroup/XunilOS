@@ -91,6 +91,13 @@ pub const R_X86_64_RELATIVE: u32 = 8;
 pub const R_X86_64_32: u32 = 10;
 pub const R_X86_64_32S: u32 = 11;
 
+// aarch64 relocation types
+pub const R_AARCH64_NONE: u32 = 0;
+pub const R_AARCH64_ABS64: u32 = 257;
+pub const R_AARCH64_GLOB_DAT: u32 = 1025;
+pub const R_AARCH64_JUMP_SLOT: u32 = 1026;
+pub const R_AARCH64_RELATIVE: u32 = 1027;
+
 // Auxiliary vector types
 pub const AT_PHDR: u64 = 3;
 pub const AT_PHENT: u64 = 4;

@@ -1,5 +1,6 @@
 use crate::task::scheduler::{SCHEDULER, current_pid};
 
+#[cfg(target_arch = "x86_64")]
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct UserContext {
@@ -21,6 +22,11 @@ pub struct UserContext {
     pub rax: u64,
     pub rsp: u64, // user rsp
 }
+
+#[cfg(target_arch = "aarch64")]
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct UserContext {}
 
 #[unsafe(no_mangle)]
 pub extern "C" fn ctx_save(regs: *const UserContext) {

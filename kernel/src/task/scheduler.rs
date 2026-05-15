@@ -86,7 +86,6 @@ impl Locked<Scheduler> {
         };
     }
 
-    #[cfg(target_arch = "x86_64")]
     pub fn switch_to(&self, pid: u64, should_swapgs: bool) {
         let (ctx_opt, entry, stack_top) = {
             let mut guard = safe_lock(|| self.lock());
@@ -117,7 +116,9 @@ impl Locked<Scheduler> {
         set_current_pid(Some(pid));
 
         match ctx_opt {
+            #[allow(unused_variables, unused_unsafe)]
             Some(saved_ctx) => unsafe {
+                #[cfg(target_arch = "x86_64")]
                 run_next((&saved_ctx) as *const UserContext, saved_ctx.rsp)
             },
             None => enter_usermode(entry as u64, (stack_top & !0xF) - 8, should_swapgs),
@@ -162,4 +163,12 @@ unsafe fn run_next(ctx: *const UserContext, user_rsp: u64) {
         "swapgs",
         "sysretq",
     );
+}
+
+#[cfg(target_arch = "aarch64")]
+#[unsafe(naked)]
+#[unsafe(no_mangle)]
+unsafe fn run_next(ctx: *const UserContext, user_rsp: u64) {
+    // TODO: add switching logic
+    core::arch::naked_asm!("udf #0");
 }

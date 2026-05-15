@@ -1,42 +1,35 @@
 use crate::{
     arch::x86_64::{
         gdt::load_gdt_x86_64,
+        heap::init_heap,
         interrupts::{PICS, init_idt_x86_64},
         mouse::setup_mouse,
+        paging::{FRAME_ALLOCATOR_X86_64, initialize_paging_x86_64},
         syscall::init_syscalls,
     },
     driver::mouse::MOUSE,
 };
+
+use x86_64::{
+    VirtAddr,
+    instructions::{interrupts, interrupts::without_interrupts, port::Port},
+    registers::control::{Cr0, Cr0Flags, Cr4, Cr4Flags},
+    structures::paging::OffsetPageTable,
+};
+
 use limine::response::{HhdmResponse, MemoryMapResponse};
-use x86_64::{
-    instructions::interrupts::without_interrupts,
-    registers::control::{Cr0, Cr0Flags},
-};
-use x86_64::{
-    instructions::{interrupts, port::Port},
-    registers::control::{Cr4, Cr4Flags},
-};
 
 const TIMER_PRECISION_HZ: u32 = 1000;
 const PIT_DIVISOR: u16 = (1_193_182_u32 / TIMER_PRECISION_HZ) as u16;
 
-#[cfg(target_arch = "x86_64")]
-use crate::arch::x86_64::{
-    heap::init_heap,
-    paging::{FRAME_ALLOCATOR_X86_64, initialize_paging},
-};
-#[cfg(target_arch = "x86_64")]
-use x86_64::{VirtAddr, structures::paging::OffsetPageTable};
-
-#[cfg(target_arch = "x86_64")]
 pub fn memory_management_init(
     hhdm_response: &HhdmResponse,
     memory_map_response: &MemoryMapResponse,
 ) -> OffsetPageTable<'static> {
     let physical_offset = VirtAddr::new(hhdm_response.offset());
-    let mapper = unsafe { initialize_paging(physical_offset) };
+    let mapper = unsafe { initialize_paging_x86_64(physical_offset) };
     let mut frame_allocator = FRAME_ALLOCATOR_X86_64.lock();
-    frame_allocator.initialize(hhdm_response.offset(), memory_map_response.entries());
+    frame_allocator.initialize(memory_map_response.entries());
     drop(frame_allocator);
     mapper
 }

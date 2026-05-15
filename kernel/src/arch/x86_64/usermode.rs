@@ -10,7 +10,7 @@ fn with_rpl3(ss: SegmentSelector) -> u64 {
 }
 
 // entry point and stack
-pub fn enter_usermode_x86_64(user_rip: u64, user_rsp: u64, should_swapgs: bool) -> ! {
+pub fn enter_usermode_x86_64(entry: u64, stack_ptr: u64, should_swapgs: bool) -> ! {
     let user_cs = with_rpl3(user_code_selector());
     let user_ss = with_rpl3(user_data_selector());
 
@@ -35,10 +35,10 @@ pub fn enter_usermode_x86_64(user_rip: u64, user_rsp: u64, should_swapgs: bool) 
             "iretq",
 
             user_ss = in(reg) user_ss,
-            user_rsp = in(reg) user_rsp,
+            user_rsp = in(reg) stack_ptr,
             rflags = in(reg) rflags,
             user_cs = in(reg) user_cs,
-            user_rip = in(reg) user_rip,
+            user_rip = in(reg) entry,
             options(noreturn)
         );
     }

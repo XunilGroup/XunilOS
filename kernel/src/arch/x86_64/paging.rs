@@ -2,10 +2,13 @@ use spin::mutex::Mutex;
 use x86_64::{
     PhysAddr, VirtAddr,
     registers::control::Cr3,
-    structures::paging::{FrameAllocator, OffsetPageTable, PageTable, PhysFrame, Size4KiB},
+    structures::paging::{
+        FrameAllocator, Mapper, OffsetPageTable, Page, PageTable, PageTableFlags, PhysFrame,
+        Size4KiB,
+    },
 };
 
-use crate::arch::arch::XunilFrameAllocator;
+use crate::arch::arch::{HHDM_OFFSET, XunilFrameAllocator};
 
 unsafe fn active_level_4_table(mem_offset: VirtAddr) -> &'static mut PageTable {
     let (level_4_table, _) = Cr3::read();
@@ -17,7 +20,9 @@ unsafe fn active_level_4_table(mem_offset: VirtAddr) -> &'static mut PageTable {
     unsafe { &mut *page_table_ptr }
 }
 
-pub unsafe fn initialize_paging(physical_memory_offset: VirtAddr) -> OffsetPageTable<'static> {
+pub unsafe fn initialize_paging_x86_64(
+    physical_memory_offset: VirtAddr,
+) -> OffsetPageTable<'static> {
     unsafe {
         let level_4_table = active_level_4_table(physical_memory_offset);
         OffsetPageTable::new(level_4_table, physical_memory_offset)
@@ -34,8 +39,10 @@ unsafe impl FrameAllocator<Size4KiB> for XunilFrameAllocator {
                 let addr = region.base + (self.region_offset as u64 * 4096);
                 self.region_offset += 1;
 
+                let hhdm_offset = HHDM_OFFSET.load(core::sync::atomic::Ordering::Relaxed);
+
                 unsafe {
-                    core::ptr::write_bytes((addr + self.hhdm_offset) as *mut u8, 0, 4096);
+                    core::ptr::write_bytes((addr + hhdm_offset) as *mut u8, 0, 4096);
                 }
 
                 return Some(PhysFrame::containing_address(PhysAddr::new(addr)));
@@ -47,6 +54,30 @@ unsafe impl FrameAllocator<Size4KiB> for XunilFrameAllocator {
 
         None
     }
+}
+
+pub fn create_and_map_multiple_pages(
+    mapper: &mut OffsetPageTable,
+    page_count: u64,
+    base: u64,
+    flags: PageTableFlags,
+) {
+    let mut frame_allocator = FRAME_ALLOCATOR_X86_64.lock();
+
+    for i in 0..page_count {
+        let frame = frame_allocator.allocate_frame().unwrap();
+
+        let virt_addr = VirtAddr::new(base + i as u64 * 4096);
+        let page = Page::<Size4KiB>::containing_address(virt_addr);
+
+        unsafe {
+            mapper
+                .map_to(page, frame, flags, &mut *frame_allocator)
+                .unwrap()
+                .flush();
+        }
+    }
+    drop(frame_allocator);
 }
 
 pub static FRAME_ALLOCATOR_X86_64: Mutex<XunilFrameAllocator> =

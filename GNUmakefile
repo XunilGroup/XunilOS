@@ -54,6 +54,7 @@ run-aarch64: edk2-ovmf $(IMAGE_NAME).iso
 		-serial stdio \
 		-drive if=pflash,unit=0,format=raw,file=edk2-ovmf/ovmf-code-$(KARCH).fd,readonly=on \
 		-cdrom $(IMAGE_NAME).iso \
+		-semihosting-config enable=on,target=native \
 		$(QEMUFLAGS)
 
 .PHONY: run-hdd-aarch64

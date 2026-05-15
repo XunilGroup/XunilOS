@@ -5,20 +5,6 @@ pub struct Locked<A> {
     inner: Mutex<A>,
 }
 
-#[cfg(target_arch = "x86_64")]
-pub fn serial_print_byte(b: u8) {
-    unsafe {
-        core::arch::asm!("out dx, al", in("dx") 0x3F8u16, in("al") b);
-    }
-}
-
-#[cfg(target_arch = "x86_64")]
-pub fn serial_print(s: &str) {
-    for &b in s.as_bytes() {
-        serial_print_byte(b);
-    }
-}
-
 impl<A> Locked<A> {
     pub const fn new(inner: A) -> Self {
         Locked {

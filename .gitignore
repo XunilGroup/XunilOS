@@ -1,4 +1,5 @@
 /limine
+/.zed
 /edk2-ovmf
 *.iso
 *.hdd
