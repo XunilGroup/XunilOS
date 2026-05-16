@@ -40,7 +40,6 @@ pub extern "C" fn init_aarch64(mapper: &mut AArchPageTable) {
     init_heap(mapper);
     set_timer_freq(TIMER_FREQUENCY_HZ);
     init_interrupts();
-    unsafe { setup_kmi() };
 }
 
 pub fn preinit_aarch64<'a>(
