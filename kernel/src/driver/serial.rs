@@ -1,3 +1,4 @@
+use crate::alloc::string::ToString;
 use crate::driver::graphics::font_render::render_text;
 use crate::driver::graphics::framebuffer::Framebuffer;
 use crate::{arch::arch::safe_lock, driver::graphics::base::rgb};
@@ -20,7 +21,7 @@ impl Write for ConsoleWriter<'_> {
 
 pub struct SerialConsole {
     text: String,
-    font_size: usize,
+    pub font_size: usize,
     dirty: bool,
 }
 
@@ -35,10 +36,45 @@ impl SerialConsole {
 
     pub fn print(&mut self, text: &str, fb: &mut Framebuffer) {
         let max_height = fb.height / (12 * self.font_size);
-        if self.text.split('\n').count() > max_height {
-            self.clear();
+        let max_width = fb.width / (8 * self.font_size);
+
+        for ch in text.chars() {
+            if ch == '\n' {
+                self.text.push('\n');
+                continue;
+            }
+
+            let line_len = self
+                .text
+                .rsplit('\n')
+                .next()
+                .map(|l| l.chars().count())
+                .unwrap_or(0);
+
+            if line_len >= max_width {
+                self.text.push('\n');
+            }
+
+            self.text.push(ch);
         }
-        self.text.push_str(text);
+
+        let lines = self.text.lines().count();
+
+        if lines > max_height {
+            let remove = lines - max_height;
+            let mut split = 0;
+
+            for (i, c) in self.text.char_indices() {
+                if c == '\n' {
+                    split += 1;
+                    if split == remove {
+                        self.text = self.text[i + 1..].to_string();
+                        break;
+                    }
+                }
+            }
+        }
+
         self.dirty = true;
     }
 

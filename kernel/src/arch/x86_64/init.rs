@@ -3,11 +3,12 @@ use crate::{
         gdt::load_gdt_x86_64,
         heap::init_heap,
         interrupts::{PICS, init_idt_x86_64},
-        mouse::setup_mouse,
+        kmi::setup_kmi,
         paging::{FRAME_ALLOCATOR_X86_64, initialize_paging_x86_64},
         syscall::init_syscalls,
     },
-    driver::mouse::MOUSE,
+    config::TIMER_FREQUENCY_HZ,
+    driver::kmi::MOUSE,
 };
 
 use x86_64::{
@@ -19,8 +20,7 @@ use x86_64::{
 
 use limine::response::{HhdmResponse, MemoryMapResponse};
 
-const TIMER_PRECISION_HZ: u32 = 1000;
-const PIT_DIVISOR: u16 = (1_193_182_u32 / TIMER_PRECISION_HZ) as u16;
+const PIT_DIVISOR: u16 = (1_193_182_u32 / TIMER_FREQUENCY_HZ as u32) as u16;
 
 pub fn memory_management_init(
     hhdm_response: &HhdmResponse,
@@ -47,10 +47,7 @@ pub fn set_pit_interval() {
     });
 }
 
-pub fn init_x86_64<'a>(
-    hhdm_response: &HhdmResponse,
-    memory_map_response: &'a MemoryMapResponse,
-) -> OffsetPageTable<'static> {
+pub fn init_x86_64<'a>(hhdm_response: &HhdmResponse, memory_map_response: &'a MemoryMapResponse) {
     load_gdt_x86_64();
 
     unsafe {
@@ -78,7 +75,7 @@ pub fn init_x86_64<'a>(
         pics.write_masks(master_mask, slave_mask);
     }
 
-    let mouse_status = setup_mouse();
+    let kmi_status = setup_kmi();
     set_pit_interval();
 
     interrupts::enable();
@@ -89,7 +86,5 @@ pub fn init_x86_64<'a>(
         .ok()
         .expect("Failed to initalize heap");
 
-    MOUSE.set_status(mouse_status);
-
-    return mapper;
+    MOUSE.set_status(kmi_status);
 }

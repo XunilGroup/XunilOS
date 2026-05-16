@@ -1,0 +1,1 @@
+pub const TIMER_FREQUENCY_HZ: usize = 1000;

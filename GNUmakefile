@@ -1,16 +1,10 @@
+include config.mk
+
 # Nuke built-in rules and variables.
 MAKEFLAGS += -rR
 .SUFFIXES:
 
-# Convenience macro to reliably declare user overridable variables.
-override USER_VARIABLE = $(if $(filter $(origin $(1)),default undefined),$(eval override $(1) := $(2)))
-
-# Target architecture to build for. Default to x86_64.
-$(call USER_VARIABLE,KARCH,x86_64)
-
-# Default user QEMU flags. These are appended to the QEMU command calls.
-$(call USER_VARIABLE,QEMUFLAGS,-m 2G)
-
+override QEMUFLAGS := -m $(MEMORY)
 override IMAGE_NAME := XunilOS-$(KARCH)
 
 .PHONY: all

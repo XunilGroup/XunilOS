@@ -2,15 +2,7 @@
 MAKEFLAGS += -rR
 .SUFFIXES:
 
-# This is the name that our final executable will have.
-# Change as needed.
-override OUTPUT := kernel
-
-# Convenience macro to reliably declare user overridable variables.
-override USER_VARIABLE = $(if $(filter $(origin $(1)),default undefined),$(eval override $(1) := $(2)))
-
-# Target architecture to build for. Default to x86_64.
-$(call USER_VARIABLE,KARCH,x86_64)
+include ../config.mk
 
 ifeq ($(RUST_TARGET),)
     override RUST_TARGET := $(KARCH)-unknown-none

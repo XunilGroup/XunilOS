@@ -1,4 +1,12 @@
-use crate::arch::arch::{HHDM_OFFSET, XunilFrameAllocator, safe_lock};
+use core::sync::atomic::{AtomicBool, Ordering};
+
+use crate::{
+    arch::{
+        aarch64::init::KERNEL_STACK,
+        arch::{HHDM_OFFSET, XunilFrameAllocator, safe_lock, serial_print},
+    },
+    util::U64Buf,
+};
 use limine::{
     memory_map::EntryType,
     response::{ExecutableAddressResponse, HhdmResponse, MemoryMapResponse},
@@ -48,9 +56,24 @@ pub fn device_flags() -> u64 {
     // no SH bits for device memory
 }
 
+static HHDM_OVERFLOW_REPORTED: AtomicBool = AtomicBool::new(false);
+
 fn phys_to_virt(phys: u64) -> *mut u64 {
-    let hhdm_offset = HHDM_OFFSET.load(core::sync::atomic::Ordering::Relaxed);
-    (phys + hhdm_offset) as *mut u64
+    let hhdm_offset = HHDM_OFFSET.load(Ordering::Relaxed);
+
+    match phys.checked_add(hhdm_offset) {
+        Some(virt) => virt as *mut u64,
+        None => {
+            if !HHDM_OVERFLOW_REPORTED.swap(true, Ordering::Relaxed) {
+                serial_print("HHDM overflow phys=");
+                serial_print(U64Buf::new(phys).as_str());
+                serial_print(", hhdm_offset=");
+                serial_print(U64Buf::new(hhdm_offset).as_str());
+                serial_print("\n");
+            }
+            panic!("phys_to_virt overflow");
+        }
+    }
 }
 
 pub fn tlb_flush() {
@@ -73,6 +96,11 @@ pub fn set_page_table(root_phys: u64) {
     }
 }
 
+pub fn setup_mair() {
+    let mair: u64 = (0xFF << 0) | (0x00 << 8);
+    unsafe { core::arch::asm!("msr mair_el1, {0}", "isb", in(reg) mair) }
+}
+
 // translation control register: handles addresses
 fn setup_tcr() {
     unsafe {
@@ -85,8 +113,10 @@ fn setup_tcr() {
             (0b01 << 10)| // ORGN0: normal WB RAWA
             (0b01 << 26)| // ORGN1
             (0b01 << 8) | // IRGN0
-            (0b01 << 24); // IRGN1
-        core::arch::asm!("msr tcr_el1, {0}", in(reg) tcr);
+            (0b01 << 24) | // IRGN1
+            (0b101 << 32); // IPS: 48-bit PA (256GB)
+
+        core::arch::asm!("msr tcr_el1, {0}", "isb", in(reg) tcr);
     }
 }
 
@@ -151,9 +181,19 @@ pub fn initialize_paging_aarch64<'a>(
         );
     }
 
-    page_table.map_page(0xFFFF_0000_0900_0000, 0x0900_0000, device_flags()); // the UART
-
+    page_table.map_range(0xFFFF_0000_0900_0000, 0x0900_0000, 0x1000, device_flags()); // the UART
+    page_table.map_range(0xFFFF_0000_0800_0000, 0x0800_0000, 0x10000, device_flags()); // the GICD
+    page_table.map_range(0xFFFF_0000_0801_0000, 0x0801_0000, 0x10000, device_flags()); // the GICC
+    page_table.map_page(0xFFFF_0000_0905_0000, 0x0905_0000, device_flags()); // KMI0 (keyboard)
+    page_table.map_page(0xFFFF_0000_0906_0000, 0x0906_0000, device_flags()); // KMI1 (mouse)
+    setup_mair();
     setup_tcr();
+
+    let stack_phys = KERNEL_STACK.0.as_ptr() as u64 - k_virt_base + k_phys_base;
+    let stack_virt = KERNEL_STACK.0.as_ptr() as u64;
+
+    page_table.map_range(stack_virt, stack_phys, 64 * 1024, kernel_data_flags());
+
     set_page_table(page_table.root_phys);
     tlb_flush();
 
@@ -166,9 +206,9 @@ pub struct AArchPageTable {
 
 pub fn alloc_frame() -> Option<u64> {
     let mut frame_allocator = safe_lock(|| FRAME_ALLOCATOR_AARCH64.lock());
-    let frame = frame_allocator.allocate_frame();
+    let frame_opt = frame_allocator.allocate_frame();
     drop(frame_allocator);
-    return frame;
+    return frame_opt;
 }
 
 impl AArchPageTable {
@@ -179,7 +219,7 @@ impl AArchPageTable {
             .expect("Could not allocate frame for page table");
 
         unsafe {
-            core::ptr::write_bytes(phys_to_virt(root_phys), 0, 512);
+            core::ptr::write_bytes(phys_to_virt(root_phys), 0, 4096);
         }
 
         AArchPageTable { root_phys }
@@ -200,7 +240,7 @@ impl AArchPageTable {
         } else {
             let child = alloc_frame().expect("Could not allocate frame when creating page table");
             unsafe {
-                core::ptr::write_bytes(phys_to_virt(child), 0, 512);
+                core::ptr::write_bytes(phys_to_virt(child), 0, 4096);
                 entry_ptr.write_volatile(child | VALID | TABLE);
             }
             return child;
@@ -216,7 +256,6 @@ impl AArchPageTable {
         let l1_phys = self.get_or_create_table(self.root_phys, l0);
         let l2_phys = self.get_or_create_table(l1_phys, l1);
         let l3_phys = self.get_or_create_table(l2_phys, l2);
-
         let entry_ptr = self.table_ptr(l3_phys, l3);
 
         unsafe {

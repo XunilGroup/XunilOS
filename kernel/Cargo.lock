@@ -7,6 +7,7 @@ name = "XunilOS"
 version = "0.1.0"
 dependencies = [
  "aarch64-cpu",
+ "fdt",
  "font8x8",
  "heapless",
  "lazy_static",
@@ -50,6 +51,12 @@ name = "const_fn"
 version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "413d67b29ef1021b4d60f4aa1e925ca031751e213832b4b1d588fae623c05c60"
+
+[[package]]
+name = "fdt"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "784a4df722dc6267a04af36895398f59d21d07dce47232adf31ec0ff2fa45e67"
 
 [[package]]
 name = "font8x8"

@@ -23,8 +23,13 @@ SECTIONS
     . = 0xffffffff80000000;
 
     __kernel_start = .;
+
     __text_start = .;
-    .text : { *(.text .text.*) } :text
+    .text : ALIGN(0x1000) {
+        *(.text.vectors)
+        *(.text .text.*)
+    } :text
+
     . = ALIGN(CONSTANT(MAXPAGESIZE));
     __text_end = .;
 

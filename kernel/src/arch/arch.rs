@@ -91,24 +91,13 @@ impl XunilFrameAllocator {
 }
 
 #[cfg(target_arch = "x86_64")]
-pub fn init<'a>(
-    hhdm_response: &HhdmResponse,
-    memory_map_response: &'a MemoryMapResponse,
-) -> OffsetPageTable<'static> {
-    return init_x86_64(hhdm_response, memory_map_response);
+pub fn init<'a>(hhdm_response: &HhdmResponse, memory_map_response: &'a MemoryMapResponse) {
+    init_x86_64(hhdm_response, memory_map_response);
 }
 
 #[cfg(target_arch = "aarch64")]
-pub fn init<'a>(
-    hhdm_response: &HhdmResponse,
-    memory_map_response: &'a MemoryMapResponse,
-    executable_address_response: &ExecutableAddressResponse,
-) -> AArchPageTable {
-    return init_aarch64(
-        hhdm_response,
-        memory_map_response,
-        executable_address_response,
-    );
+pub fn init(mapper: &mut AArchPageTable) {
+    init_aarch64(mapper);
 }
 
 #[cfg(target_arch = "x86_64")]

@@ -1,10 +1,13 @@
 use core::sync::atomic::Ordering;
 
 use crate::{
-    arch::x86_64::{gdt, mouse::mouse_interrupt},
+    arch::x86_64::gdt,
     driver::{
-        graphics::framebuffer::with_framebuffer, keyboard::push_scancode, mouse::MOUSE,
-        serial::with_serial_console, timer::TIMER,
+        graphics::framebuffer::with_framebuffer,
+        keyboard::push_scancode,
+        kmi::{keyboard_interrupt, mouse_interrupt},
+        serial::with_serial_console,
+        timer::TIMER,
     },
     println,
 };
@@ -12,7 +15,6 @@ use lazy_static::lazy_static;
 use pic8259::ChainedPics;
 use spin::Mutex;
 use x86_64::{
-    instructions::port::Port,
     registers::control::Cr2,
     structures::idt::{InterruptDescriptorTable, InterruptStackFrame, PageFaultErrorCode},
 };
@@ -115,17 +117,7 @@ extern "x86-interrupt" fn timer_interrupt_handler(_stack_frame: InterruptStackFr
 }
 
 extern "x86-interrupt" fn mouse_interrupt_handler(_stack_frame: InterruptStackFrame) {
-    let interrupt_result = mouse_interrupt();
-
-    if let Some(interrupt_result) = interrupt_result {
-        MOUSE.interrupt(
-            interrupt_result.0,
-            interrupt_result.1,
-            interrupt_result.2,
-            interrupt_result.3,
-            interrupt_result.4,
-        );
-    }
+    mouse_interrupt();
 
     unsafe {
         PICS.lock()
@@ -134,10 +126,9 @@ extern "x86-interrupt" fn mouse_interrupt_handler(_stack_frame: InterruptStackFr
 }
 
 pub extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStackFrame) {
-    let mut port = Port::new(0x60);
-    let scancode: u8 = unsafe { port.read() };
-
-    push_scancode(scancode);
+    if let Some(scancode) = keyboard_interrupt() {
+        push_scancode(scancode);
+    }
 
     unsafe {
         PICS.lock()
