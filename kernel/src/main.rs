@@ -4,9 +4,33 @@
 #![feature(naked_functions_rustic_abi)]
 extern crate alloc;
 use core::fmt::Write;
+use core::sync::atomic::{AtomicU64, Ordering};
 
 #[cfg(target_arch = "aarch64")]
+use crate::arch::aarch64::interrupts::enable_interrupts;
+#[cfg(target_arch = "aarch64")]
+use crate::arch::aarch64::paging::AArchPageTable;
+#[cfg(target_arch = "aarch64")]
+use crate::driver::graphics::primitives::rectangle_filled;
+#[cfg(target_arch = "aarch64")]
 use aarch64_cpu::registers::{DAIF, Writeable};
+
+#[cfg(target_arch = "aarch64")]
+use crate::driver::io::virtio::input::init_keyboard;
+
+#[cfg(target_arch = "x86_64")]
+use crate::driver::elf::loader::run_elf;
+#[cfg(target_arch = "x86_64")]
+use crate::driver::io::ps2::init_keyboard;
+
+use crate::arch::arch::{HHDM_OFFSET, infinite_idle, init, kernel_crash, serial_print};
+
+use crate::driver::graphics::base::rgb;
+use crate::driver::graphics::framebuffer::{init_framebuffer, with_framebuffer};
+
+use crate::driver::serial::{ConsoleWriter, init_serial_console, with_serial_console};
+use crate::driver::timer::TIMER;
+
 use limine::BaseRevision;
 use limine::request::{
     DateAtBootRequest, ExecutableAddressRequest, FramebufferRequest, HhdmRequest, MemoryMapRequest,
@@ -18,21 +42,6 @@ pub mod driver;
 pub mod mm;
 pub mod task;
 pub mod util;
-
-#[cfg(target_arch = "aarch64")]
-use crate::arch::aarch64::interrupts::enable_interrupts;
-#[cfg(target_arch = "aarch64")]
-use crate::arch::aarch64::paging::AArchPageTable;
-use crate::arch::arch::{HHDM_OFFSET, infinite_idle, init, kernel_crash, serial_print};
-#[cfg(target_arch = "x86_64")]
-use crate::driver::elf::loader::run_elf;
-use crate::driver::graphics::base::rgb;
-use crate::driver::graphics::framebuffer::{init_framebuffer, with_framebuffer};
-#[cfg(target_arch = "aarch64")]
-use crate::driver::graphics::primitives::rectangle_filled;
-use crate::driver::keyboard::init_keyboard;
-use crate::driver::serial::{ConsoleWriter, init_serial_console, with_serial_console};
-use crate::driver::timer::TIMER;
 
 #[repr(C, align(16))]
 #[allow(dead_code)]
@@ -77,6 +86,9 @@ static _START_MARKER: RequestsStartMarker = RequestsStartMarker::new();
 #[used]
 #[unsafe(link_section = ".requests_end_marker")]
 static _END_MARKER: RequestsEndMarker = RequestsEndMarker::new();
+
+pub static KERNEL_PHYS_BASE: AtomicU64 = AtomicU64::new(0);
+pub static KERNEL_VIRT_BASE: AtomicU64 = AtomicU64::new(0);
 
 #[macro_export]
 macro_rules! print {
@@ -124,23 +136,34 @@ unsafe extern "C" fn kmain() -> ! {
         );
         #[allow(unused_variables)]
         if let Some(memory_map_response) = MEMORY_MAP_REQUEST.get_response() {
-            #[cfg(target_arch = "aarch64")]
             if let Some(executable_address_response) = EXECUTABLE_ADDRESS_REQUEST.get_response() {
+                KERNEL_PHYS_BASE.store(
+                    executable_address_response.physical_base(),
+                    Ordering::Relaxed,
+                );
+
+                KERNEL_VIRT_BASE.store(
+                    executable_address_response.virtual_base(),
+                    Ordering::Relaxed,
+                );
+
+                #[cfg(target_arch = "aarch64")]
                 use crate::arch::aarch64::init::preinit_aarch64;
+                #[cfg(target_arch = "aarch64")]
                 preinit_aarch64(
                     hhdm_response,
                     memory_map_response,
                     executable_address_response,
                 );
 
+                #[cfg(target_arch = "x86_64")]
+                unsafe {
+                    kernel_main_x86_64()
+                }
+
                 loop {}
             } else {
                 kernel_crash()
-            }
-
-            #[cfg(target_arch = "x86_64")]
-            unsafe {
-                kernel_main_x86_64()
             }
         } else {
             kernel_crash(); // Could not get required info from Limine's memory map.

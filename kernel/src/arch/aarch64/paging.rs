@@ -184,9 +184,7 @@ pub fn initialize_paging_aarch64<'a>(
     page_table.map_range(0xFFFF_0000_0900_0000, 0x0900_0000, 0x1000, device_flags()); // the UART
     page_table.map_range(0xFFFF_0000_0800_0000, 0x0800_0000, 0x10000, device_flags()); // the GICD
     page_table.map_range(0xFFFF_0000_0801_0000, 0x0801_0000, 0x10000, device_flags()); // the GICC
-    page_table.map_page(0xFFFF_0000_0905_0000, 0x0905_0000, device_flags()); // KMI0 (keyboard)
-    page_table.map_page(0xFFFF_0000_0906_0000, 0x0906_0000, device_flags()); // KMI1 (mouse)
-    setup_mair();
+    page_table.map_range(0xFFFF_0000_0a00_0000, 0x0a00_0000, 0x8000, device_flags()); // Virtio    setup_mair();
     setup_tcr();
 
     let stack_phys = KERNEL_STACK.0.as_ptr() as u64 - k_virt_base + k_phys_base;

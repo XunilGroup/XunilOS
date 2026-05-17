@@ -2,10 +2,10 @@ use crate::{
     arch::aarch64::{
         heap::init_heap,
         interrupts::init_interrupts,
-        kmi::setup_kmi,
         paging::{AArchPageTable, initialize_paging_aarch64},
     },
     config::TIMER_FREQUENCY_HZ,
+    driver::io::virtio::scan_devices,
 };
 use limine::response::{ExecutableAddressResponse, HhdmResponse, MemoryMapResponse};
 
@@ -17,7 +17,7 @@ pub static KERNEL_STACK: Stack = Stack([0; 64 * 1024]);
 
 pub fn set_timer_freq(freq: usize) {
     unsafe {
-        core::arch::asm!("mrs {}, cntp_tval_el0", in(reg) freq);
+        core::arch::asm!("mrs {}, cntp_tval_el0", "isb", in(reg) freq);
     }
 }
 
@@ -39,6 +39,7 @@ pub unsafe fn init_aarch64_trampoline(mapper: &mut AArchPageTable) {
 pub extern "C" fn init_aarch64(mapper: &mut AArchPageTable) {
     init_heap(mapper);
     set_timer_freq(TIMER_FREQUENCY_HZ);
+    scan_devices();
     init_interrupts();
 }
 

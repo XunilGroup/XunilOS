@@ -4,7 +4,7 @@ include config.mk
 MAKEFLAGS += -rR
 .SUFFIXES:
 
-override QEMUFLAGS := -m $(MEMORY)
+override QEMUFLAGS := -m $(MEMORY) -global virtio-mmio.force-legacy=false
 override IMAGE_NAME := XunilOS-$(KARCH)
 
 .PHONY: all
@@ -39,12 +39,14 @@ run-hdd-x86_64: edk2-ovmf $(IMAGE_NAME).hdd
 .PHONY: run-aarch64
 run-aarch64: edk2-ovmf $(IMAGE_NAME).iso
 	qemu-system-$(KARCH) \
-		-M virt \
+		-M virt,gic-version=2,secure=off \
 		-cpu cortex-a72 \
 		-device ramfb \
 		-device qemu-xhci \
 		-device usb-kbd \
 		-device usb-mouse \
+		-device virtio-keyboard-device \
+		-device virtio-mouse-device \
 		-serial stdio \
 		-drive if=pflash,unit=0,format=raw,file=edk2-ovmf/ovmf-code-$(KARCH).fd,readonly=on \
 		-cdrom $(IMAGE_NAME).iso \

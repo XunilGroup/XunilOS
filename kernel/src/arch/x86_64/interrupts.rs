@@ -4,8 +4,7 @@ use crate::{
     arch::x86_64::gdt,
     driver::{
         graphics::framebuffer::with_framebuffer,
-        keyboard::push_scancode,
-        kmi::{keyboard_interrupt, mouse_interrupt},
+        io::ps2::{keyboard_interrupt, mouse_interrupt, push_scancode},
         serial::with_serial_console,
         timer::TIMER,
     },

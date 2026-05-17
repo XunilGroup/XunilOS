@@ -38,9 +38,9 @@ fn fd_ok(fd: Fd) -> bool {
     fd >= 0 && (fd as usize) < MAX_FD
 }
 
-static DOOM_WAD: &[u8] = include_bytes!("../../../../assets/doom1.wad");
-static DOOM_ELF: &[u8] = include_bytes!("../../../../assets/doomgeneric");
-static HELLOWORLD_ELF: &[u8] = include_bytes!("../../../../assets/helloworld.elf");
+static DOOM_WAD: &[u8] = include_bytes!("../../../../../assets/doom1.wad");
+static DOOM_ELF: &[u8] = include_bytes!("../../../../../assets/doomgeneric");
+static HELLOWORLD_ELF: &[u8] = include_bytes!("../../../../../assets/helloworld.elf");
 
 static FILES: &[FakeFileEntry] = &[
     FakeFileEntry {

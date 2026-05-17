@@ -2,10 +2,10 @@ use core::{arch::global_asm, sync::atomic::Ordering};
 
 use crate::{
     arch::syscall::syscall_dispatch,
+    config::TIMER_FREQUENCY_HZ,
     driver::{
         graphics::framebuffer::with_framebuffer,
-        keyboard::push_scancode,
-        kmi::{keyboard_interrupt, mouse_interrupt},
+        io::virtio::{KEYBOARD_SLOT, MOUSE_SLOT, input::input_interrupt},
         serial::with_serial_console,
         timer::TIMER,
     },
@@ -161,8 +161,13 @@ pub fn init_interrupts() {
 pub fn enable_interrupts() {
     unsafe {
         gic_enable_interrupt(30); // timer IRQ
-        gic_enable_interrupt(17); // keyboard IRQ
-        gic_enable_interrupt(18); // mouse IRQ
+
+        let keyboard_irq = 32 + 0x10 + KEYBOARD_SLOT.load(Ordering::Relaxed);
+        let mouse_irq = 32 + 0x10 + MOUSE_SLOT.load(Ordering::Relaxed);
+
+        gic_enable_interrupt(keyboard_irq as u32);
+        gic_enable_interrupt(mouse_irq as u32);
+
         core::arch::asm!("msr cntp_ctl_el0, {}", in(reg) 1u64); // enable timer
     }
     DAIF.write(DAIF::D::Masked + DAIF::A::Masked + DAIF::I::Unmasked + DAIF::F::Masked);
@@ -183,6 +188,10 @@ unsafe extern "C" fn no_operation(ctx: *mut UserContext) {
 #[unsafe(no_mangle)]
 unsafe extern "C" fn irq_handler(ctx: *mut UserContext) {
     let interrupt_id = unsafe { gic_acknowledge() };
+
+    let keyboard_irq = 32 + 0x10 + KEYBOARD_SLOT.load(Ordering::Relaxed);
+    let mouse_irq = 32 + 0x10 + MOUSE_SLOT.load(Ordering::Relaxed);
+
     match interrupt_id {
         30 => {
             TIMER.interrupt();
@@ -198,14 +207,14 @@ unsafe extern "C" fn irq_handler(ctx: *mut UserContext) {
                     fb.present();
                 });
             }
+
+            unsafe { core::arch::asm!("msr cntp_tval_el0, {}", in(reg) TIMER_FREQUENCY_HZ) };
         }
-        17 => {
-            if let Some(scancode) = keyboard_interrupt() {
-                push_scancode(scancode);
-            }
+        interrupt_id if keyboard_irq == interrupt_id as u64 => {
+            input_interrupt("kbd");
         }
-        18 => {
-            mouse_interrupt();
+        interrupt_id if mouse_irq == interrupt_id as u64 => {
+            input_interrupt("mouse");
         }
 
         _ => {}
@@ -288,6 +297,6 @@ exception_handler!(current_el_spx_serror, no_operation);
 
 // usermode
 exception_handler!(lower_el_aarch64_sync, sync_handler_user);
-exception_handler!(lower_el_aarch64_irq, no_operation);
+exception_handler!(lower_el_aarch64_irq, irq_handler);
 exception_handler!(lower_el_aarch64_fiq, no_operation);
 exception_handler!(lower_el_aarch64_serror, no_operation);

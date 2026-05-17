@@ -8,7 +8,7 @@ use crate::{
         syscall::init_syscalls,
     },
     config::TIMER_FREQUENCY_HZ,
-    driver::kmi::MOUSE,
+    driver::io::mouse::MOUSE,
 };
 
 use x86_64::{

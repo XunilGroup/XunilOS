@@ -13,13 +13,19 @@ use x86_64::{
 
 #[cfg(target_arch = "aarch64")]
 use crate::arch::aarch64::paging::AArchPageTable;
+#[cfg(target_arch = "x86_64")]
+use crate::driver::io::ps2::process_scancodes;
+#[cfg(target_arch = "aarch64")]
+use crate::driver::io::virtio::input::process_keycodes;
 use crate::{
     arch::arch::{FRAME_ALLOCATOR, sleep},
     driver::{
         elf::loader::run_elf,
-        fs::vfs::{vfs_close, vfs_lseek, vfs_open, vfs_read},
         graphics::framebuffer::{FRAMEBUFFER, USER_FB_BASE, with_framebuffer},
-        keyboard::{KeyboardEvent, process_scancodes},
+        io::{
+            fs::vfs::{vfs_close, vfs_lseek, vfs_open, vfs_read},
+            keyboard::KeyboardEvent,
+        },
         timer::TIMER,
     },
     print,
@@ -192,7 +198,11 @@ fn close(fd: isize) -> isize {
 }
 
 fn kbd_read(user_ptr: *mut KeyboardEvent, max_events: isize) -> isize {
+    #[cfg(target_arch = "x86_64")]
     process_scancodes();
+    #[cfg(target_arch = "aarch64")]
+    process_keycodes();
+
     if max_events <= 0 || user_ptr.is_null() {
         return -1;
     }

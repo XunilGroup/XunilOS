@@ -1,7 +1,8 @@
 use alloc::vec::Vec;
 
 use crate::{
-    driver::keyboard::KeyboardEvent, mm::address_space::AddressSpace, task::context::UserContext,
+    driver::io::keyboard::KeyboardEvent, mm::address_space::AddressSpace,
+    task::context::UserContext,
 };
 
 pub enum ProcessState {
