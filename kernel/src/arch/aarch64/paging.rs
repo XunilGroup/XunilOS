@@ -252,30 +252,6 @@ impl AArchPageTable {
         unsafe {
             entry_ptr.write_volatile(phys | flags);
         }
-
-        if virt == USER_FB_BASE + 0x1000 {
-            serial_print("entry_ptr=");
-            serial_print(U64Buf::new(entry_ptr as u64).as_str());
-            serial_print(", virt=");
-            serial_print(U64Buf::new(virt as u64).as_str());
-            serial_print(", phys=");
-            serial_print(U64Buf::new(phys as u64).as_str());
-            serial_print(", l0=");
-            serial_print(U64Buf::new(l0 as u64).as_str());
-            serial_print(", l1=");
-            serial_print(U64Buf::new(l1 as u64).as_str());
-            serial_print(", l2=");
-            serial_print(U64Buf::new(l2 as u64).as_str());
-            serial_print(", l3=");
-            serial_print(U64Buf::new(l3 as u64).as_str());
-            serial_print(", flags=");
-            serial_print(U64Buf::new(flags).as_str());
-
-            let written = unsafe { entry_ptr.read_volatile() };
-            serial_print(", readback=");
-            serial_print(U64Buf::new(written).as_str());
-            serial_print("\n");
-        }
     }
 
     pub fn map_range(&self, virt: u64, phys: u64, size: u64, flags: u64) {
