@@ -59,7 +59,7 @@ pub fn load_file(mapper: &mut PageTable, elf_bytes: &[u8]) -> (*const u8, u64) {
         unsafe { core::ptr::read_unaligned(elf_bytes.as_ptr() as *const Elf64Ehdr) };
 
     if !validate_elf(&elf_header, elf_bytes.len()) {
-        return (null(), 0);
+        panic!("Invalid ELF");
     }
 
     let elf_header_ptr = elf_bytes.as_ptr() as *const Elf64Ehdr;
@@ -72,7 +72,7 @@ pub fn load_file(mapper: &mut PageTable, elf_bytes: &[u8]) -> (*const u8, u64) {
     };
 }
 
-pub fn run_elf(file_bytes: &[u8], should_swapgs: bool) {
+pub fn run_elf(file_bytes: &[u8], should_swapgs: bool, switch_to: bool) {
     let stack_base: u64 = 0x0000_7fff_0000_0000;
     let page_count = 4096; // 16 mib
     let page_size = 0x1000u64;
@@ -109,7 +109,9 @@ pub fn run_elf(file_bytes: &[u8], should_swapgs: bool) {
             process.address_space = Some(address_space)
         });
 
-        SCHEDULER.switch_to(process_pid, should_swapgs);
+        if switch_to {
+            SCHEDULER.switch_to(process_pid, should_swapgs);
+        }
     } else {
         return;
     };

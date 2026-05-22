@@ -144,6 +144,7 @@ pub const DT_VERNEED: i64 = 0x6ffffffe;
 pub const DT_VERNEEDNUM: i64 = 0x6fffffff;
 
 #[repr(C)]
+#[derive(Debug)]
 pub struct Elf64Ehdr {
     pub e_ident: [u8; 16],
     pub e_type: u16,

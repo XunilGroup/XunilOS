@@ -18,7 +18,7 @@ use crate::driver::io::ps2::process_scancodes;
 #[cfg(target_arch = "aarch64")]
 use crate::driver::io::virtio::input::process_keycodes;
 use crate::{
-    arch::arch::{FRAME_ALLOCATOR, sleep},
+    arch::arch::{FRAME_ALLOCATOR, serial_print, sleep},
     driver::{
         elf::loader::run_elf,
         graphics::framebuffer::{FRAMEBUFFER, USER_FB_BASE, with_framebuffer},
@@ -33,7 +33,7 @@ use crate::{
         process::ProcessState,
         scheduler::{SCHEDULER, current_pid},
     },
-    util::{align_down, align_up},
+    util::{U64Buf, align_down, align_up},
 };
 
 use crate::{
@@ -363,7 +363,7 @@ pub fn exec(arg0: isize) -> isize {
         return -1;
     }
 
-    run_elf(&buf, true);
+    run_elf(&buf, true, false);
     0
 }
 
@@ -384,6 +384,7 @@ pub fn set_reschedule(should_reschedule: bool) {
 }
 
 pub fn exit() -> isize {
+    serial_print("Process Exited.");
     let pid = current_pid().unwrap_or(0);
     if pid == 0 {
         return 0;
@@ -414,6 +415,33 @@ pub fn exit() -> isize {
     crate::arch::arch::infinite_idle();
 }
 
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn check_and_reschedule() -> usize {
+    let pid = current_pid().unwrap_or(0);
+
+    if pid == 0 {
+        return 0;
+    }
+
+    let should = SCHEDULER
+        .with_process(pid, |process| process.should_reschedule)
+        .unwrap_or(false);
+
+    if !should {
+        return 0;
+    }
+
+    let next_task = SCHEDULER.next_task();
+
+    if next_task == pid {
+        return 0;
+    }
+
+    SCHEDULER.switch_to(next_task, true);
+
+    1
+}
+
 #[allow(unused_variables)]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn syscall_dispatch(
@@ -427,20 +455,25 @@ pub unsafe extern "C" fn syscall_dispatch(
 ) -> isize {
     #[cfg(target_arch = "x86_64")]
     interrupts::enable();
+    // if num != 1 {
+    //     serial_print("syscall num=");
+    //     serial_print(U64Buf::new(num as u64).as_str());
+    //     serial_print("\n");
+    // }
 
     set_reschedule(match num {
         BRK => false,
-        READ => true,
+        READ => false,
         WRITE => false,
         OPEN => true,
         CLOSE => true,
-        LSEEK => true,
+        LSEEK => false,
         EXIT => true,
         SLEEP => true,
         CLOCK_GETTIME => false,
         MAP_FRAMEBUFFER => false,
-        KBD_READ => true,
-        FRAMEBUFFER_SWAP => true,
+        KBD_READ => false,
+        FRAMEBUFFER_SWAP => false,
         GETPID => false,
         EXECVE => true,
         _ => false,

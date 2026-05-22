@@ -4,8 +4,7 @@ use crate::{
         interrupts::init_interrupts,
         paging::{AArchPageTable, initialize_paging_aarch64},
     },
-    config::TIMER_FREQUENCY_HZ,
-    driver::io::virtio::scan_devices,
+    driver::io::virtio::scan_virtio_devices,
 };
 use limine::response::{ExecutableAddressResponse, HhdmResponse, MemoryMapResponse};
 
@@ -14,12 +13,6 @@ use limine::response::{ExecutableAddressResponse, HhdmResponse, MemoryMapRespons
 pub struct Stack(pub [u8; 64 * 1024]);
 
 pub static KERNEL_STACK: Stack = Stack([0; 64 * 1024]);
-
-pub fn set_timer_freq(freq: usize) {
-    unsafe {
-        core::arch::asm!("mrs {}, cntp_tval_el0", "isb", in(reg) freq);
-    }
-}
 
 #[unsafe(naked)]
 pub unsafe fn init_aarch64_trampoline(mapper: &mut AArchPageTable) {
@@ -38,8 +31,7 @@ pub unsafe fn init_aarch64_trampoline(mapper: &mut AArchPageTable) {
 #[unsafe(no_mangle)]
 pub extern "C" fn init_aarch64(mapper: &mut AArchPageTable) {
     init_heap(mapper);
-    set_timer_freq(TIMER_FREQUENCY_HZ);
-    scan_devices();
+    scan_virtio_devices();
     init_interrupts();
 }
 

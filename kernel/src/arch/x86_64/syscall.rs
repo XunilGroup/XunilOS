@@ -4,7 +4,7 @@ use x86_64::instructions::tlb::flush_all;
 
 use crate::{
     arch::x86_64::gdt::{GDT, TSS},
-    task::scheduler::{SCHEDULER, current_pid},
+    task::context::UserContext,
 };
 
 const IA32_EFER: u32 = 0xC0000080;
@@ -83,33 +83,6 @@ pub fn init_syscalls() {
         let star = (kernel_cs << 32) | (sysret_base << 48);
         wrmsr(IA32_STAR, star);
     }
-}
-
-#[unsafe(no_mangle)]
-unsafe extern "C" fn check_and_reschedule() -> usize {
-    let pid = current_pid().unwrap_or(0);
-
-    if pid == 0 {
-        return 0;
-    }
-
-    let should = SCHEDULER
-        .with_process(pid, |process| process.should_reschedule)
-        .unwrap_or(false);
-
-    if !should {
-        return 0;
-    }
-
-    let next_task = SCHEDULER.next_task();
-
-    if next_task == pid {
-        return 0;
-    }
-
-    SCHEDULER.switch_to(next_task, false);
-
-    1
 }
 
 #[unsafe(naked)]
@@ -204,5 +177,32 @@ unsafe extern "C" fn syscall_entry() {
         .done:
             ud2
         "#,
+    );
+}
+
+#[unsafe(naked)]
+#[unsafe(no_mangle)]
+pub unsafe fn run_next(ctx: *const UserContext, user_rsp: u64) {
+    core::arch::naked_asm!(
+        "mov gs:[0], rsi", // store new user rsp
+        "mov rsp, rdi",
+        "mov r15, qword ptr [rsp + 0]",
+        "mov r14, qword ptr [rsp + 8]",
+        "mov r13, qword ptr [rsp + 16]",
+        "mov r12, qword ptr [rsp + 24]",
+        "mov r11, qword ptr [rsp + 32]", // rflags
+        "mov r10, qword ptr [rsp + 40]",
+        "mov r9,  qword ptr [rsp + 48]",
+        "mov r8,  qword ptr [rsp + 56]",
+        "mov rsi, qword ptr [rsp + 64]",
+        "mov rdi, qword ptr [rsp + 72]",
+        "mov rbp, qword ptr [rsp + 80]",
+        "mov rdx, qword ptr [rsp + 88]",
+        "mov rcx, qword ptr [rsp + 96]", // rip
+        "mov rbx, qword ptr [rsp + 104]",
+        "mov rax, qword ptr [rsp + 112]",
+        "mov rsp, qword ptr [rsp + 120]", // user rsp
+        "swapgs",
+        "sysretq",
     );
 }

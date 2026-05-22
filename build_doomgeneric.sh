@@ -1,6 +1,6 @@
 bash build_libxunil.sh
 cd user/apps/doomgeneric/doomgeneric
 rm -r ./build
-make LD=/usr/bin/ld -j16 -f Makefile.xunil
-cp doomgeneric ../../../../assets/doomgeneric
+make -j16 -f Makefile.xunil
+cp doomgeneric ../../../../assets/$KARCH/doomgeneric
 cd ../../../..

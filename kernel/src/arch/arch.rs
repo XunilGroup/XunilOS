@@ -12,6 +12,9 @@ use x86_64::{
 };
 
 #[cfg(target_arch = "aarch64")]
+use aarch64_cpu::registers::{DAIF, Writeable};
+
+#[cfg(target_arch = "aarch64")]
 pub use crate::arch::aarch64::paging::FRAME_ALLOCATOR_AARCH64 as FRAME_ALLOCATOR;
 #[cfg(target_arch = "aarch64")]
 use crate::arch::aarch64::{
@@ -91,8 +94,11 @@ impl XunilFrameAllocator {
 }
 
 #[cfg(target_arch = "x86_64")]
-pub fn init<'a>(hhdm_response: &HhdmResponse, memory_map_response: &'a MemoryMapResponse) {
-    init_x86_64(hhdm_response, memory_map_response);
+pub fn init<'a>(
+    hhdm_response: &HhdmResponse,
+    memory_map_response: &'a MemoryMapResponse,
+) -> OffsetPageTable<'a> {
+    init_x86_64(hhdm_response, memory_map_response)
 }
 
 #[cfg(target_arch = "aarch64")]
@@ -110,11 +116,26 @@ pub fn enter_usermode(entry: u64, stack_ptr: u64, should_swapgs: bool) {
     enter_usermode_aarch64(entry, stack_ptr, should_swapgs);
 }
 
+#[cfg(target_arch = "x86_64")]
 pub fn safe_lock<R, F: FnOnce() -> R>(f: F) -> R {
-    #[cfg(target_arch = "x86_64")]
     return without_interrupts(|| f());
-    #[cfg(target_arch = "aarch64")]
-    return f();
+}
+
+#[cfg(target_arch = "aarch64")]
+pub fn safe_lock<R, F: FnOnce() -> R>(f: F) -> R {
+    // #[cfg(target_arch = "aarch64")]
+    // {
+    //     DAIF.write(DAIF::D::Masked + DAIF::A::Masked + DAIF::I::Masked + DAIF::F::Masked);
+    // }
+
+    let r = f();
+
+    // #[cfg(target_arch = "aarch64")]
+    // {
+    //     DAIF.write(DAIF::D::Masked + DAIF::A::Masked + DAIF::I::Unmasked + DAIF::F::Masked);
+    // }
+
+    r
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -157,6 +178,10 @@ pub fn idle() {
 pub fn sleep(ticks: u64) {
     let start = TIMER.now();
     while start.ticks_since() < ticks {
+        #[cfg(target_arch = "aarch64")]
+        {
+            DAIF.write(DAIF::D::Masked + DAIF::A::Masked + DAIF::I::Unmasked + DAIF::F::Masked);
+        }
         idle();
     }
 }

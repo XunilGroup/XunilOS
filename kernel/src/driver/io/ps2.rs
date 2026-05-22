@@ -14,6 +14,7 @@ use crate::arch::x86_64::kmi::{
 };
 use crate::{
     driver::io::{keyboard::*, mouse::MOUSE},
+    println,
     task::scheduler::SCHEDULER,
     util::get_bit,
 };
@@ -183,13 +184,14 @@ pub fn process_scancode(scancode: u8) -> Option<KeyboardEvent> {
         };
 
         if let Some(linux_keycode) = keycode_to_linux(keycode) {
+            let effective_shift = kbd.get_modifiers().is_shifted() & kbd.get_modifiers().capslock;
             return Some(KeyboardEvent {
                 state: if state == KeyState::Down { 1 } else { 0 },
                 _pad1: 0,
                 key: linux_keycode as u16,
                 mods: 0,
                 _pad2: 0,
-                unicode,
+                unicode: keycode_to_char(linux_keycode, effective_shift).unwrap_or('\0') as u32,
             });
         } else {
             return None;

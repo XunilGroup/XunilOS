@@ -4,12 +4,15 @@ use alloc::{collections::btree_map::BTreeMap, vec::Vec};
 
 use crate::{
     arch::arch::{enter_usermode, safe_lock},
-    task::{
-        context::UserContext,
-        process::{Process, ProcessState},
-    },
+    task::context::UserContext,
+    task::process::{Process, ProcessState},
     util::Locked,
 };
+
+#[cfg(target_arch = "aarch64")]
+use crate::arch::aarch64::interrupts::run_next;
+#[cfg(target_arch = "x86_64")]
+use crate::arch::x86_64::syscall::run_next;
 
 pub static CURRENT_PID: AtomicU64 = AtomicU64::new(0);
 
@@ -119,9 +122,20 @@ impl Locked<Scheduler> {
             #[allow(unused_variables, unused_unsafe)]
             Some(saved_ctx) => unsafe {
                 #[cfg(target_arch = "x86_64")]
-                run_next((&saved_ctx) as *const UserContext, saved_ctx.rsp)
+                run_next((&saved_ctx) as *const UserContext, saved_ctx.rsp);
+                #[cfg(target_arch = "aarch64")]
+                run_next((&saved_ctx) as *const UserContext, saved_ctx.sp_el0);
             },
-            None => enter_usermode(entry as u64, (stack_top & !0xF) - 8, should_swapgs),
+            None => enter_usermode(
+                entry as u64,
+                (stack_top & !0xF)
+                    - cfg_select! {
+                        target_arch = "x86_64" => 8,
+                        target_arch = "aarch64" => 16,
+                        _ => 8
+                    },
+                should_swapgs,
+            ),
         }
     }
 
@@ -136,39 +150,3 @@ impl Locked<Scheduler> {
 }
 
 pub static SCHEDULER: Locked<Scheduler> = Locked::new(Scheduler::new());
-
-#[cfg(target_arch = "x86_64")]
-#[unsafe(naked)]
-#[unsafe(no_mangle)]
-unsafe fn run_next(ctx: *const UserContext, user_rsp: u64) {
-    core::arch::naked_asm!(
-        "mov gs:[0], rsi", // store new user rsp
-        "mov rsp, rdi",
-        "mov r15, qword ptr [rsp + 0]",
-        "mov r14, qword ptr [rsp + 8]",
-        "mov r13, qword ptr [rsp + 16]",
-        "mov r12, qword ptr [rsp + 24]",
-        "mov r11, qword ptr [rsp + 32]", // rflags
-        "mov r10, qword ptr [rsp + 40]",
-        "mov r9,  qword ptr [rsp + 48]",
-        "mov r8,  qword ptr [rsp + 56]",
-        "mov rsi, qword ptr [rsp + 64]",
-        "mov rdi, qword ptr [rsp + 72]",
-        "mov rbp, qword ptr [rsp + 80]",
-        "mov rdx, qword ptr [rsp + 88]",
-        "mov rcx, qword ptr [rsp + 96]", // rip
-        "mov rbx, qword ptr [rsp + 104]",
-        "mov rax, qword ptr [rsp + 112]",
-        "mov rsp, qword ptr [rsp + 120]", // user rsp
-        "swapgs",
-        "sysretq",
-    );
-}
-
-#[cfg(target_arch = "aarch64")]
-#[unsafe(naked)]
-#[unsafe(no_mangle)]
-unsafe fn run_next(ctx: *const UserContext, user_rsp: u64) {
-    // TODO: add switching logic
-    core::arch::naked_asm!("udf #0");
-}

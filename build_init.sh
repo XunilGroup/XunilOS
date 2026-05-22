@@ -1,5 +1,5 @@
 bash build_libxunil.sh
 cd user/init
-cargo build --target x86_64-unknown-none --release
-cp ./target/x86_64-unknown-none/release/init ../../assets/init
+cargo build --target $KARCH-unknown-none --release --config profile.release.debug=true
+cp ./target/$KARCH-unknown-none/release/init ../../assets/$KARCH/init
 cd ../..

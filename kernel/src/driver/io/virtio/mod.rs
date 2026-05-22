@@ -53,7 +53,7 @@ pub fn get_device(slot: u64) -> Option<VirtioMmio> {
     Some(device)
 }
 
-pub fn scan_devices() {
+pub fn scan_virtio_devices() {
     for i in 0..VIRTIO_MMIO_COUNT {
         let base = VIRTIO_MMIO_BASE + i * VIRTIO_MMIO_STRIDE;
         let device = VirtioMmio::new(base);

@@ -1,10 +1,11 @@
-use core::sync::atomic::{AtomicBool, Ordering};
+use core::sync::atomic::Ordering;
 
 use crate::{
     arch::{
         aarch64::init::KERNEL_STACK,
         arch::{HHDM_OFFSET, XunilFrameAllocator, safe_lock, serial_print},
     },
+    driver::graphics::framebuffer::USER_FB_BASE,
     util::U64Buf,
 };
 use limine::{
@@ -56,21 +57,12 @@ pub fn device_flags() -> u64 {
     // no SH bits for device memory
 }
 
-static HHDM_OVERFLOW_REPORTED: AtomicBool = AtomicBool::new(false);
-
 fn phys_to_virt(phys: u64) -> *mut u64 {
     let hhdm_offset = HHDM_OFFSET.load(Ordering::Relaxed);
 
     match phys.checked_add(hhdm_offset) {
         Some(virt) => virt as *mut u64,
         None => {
-            if !HHDM_OVERFLOW_REPORTED.swap(true, Ordering::Relaxed) {
-                serial_print("HHDM overflow phys=");
-                serial_print(U64Buf::new(phys).as_str());
-                serial_print(", hhdm_offset=");
-                serial_print(U64Buf::new(hhdm_offset).as_str());
-                serial_print("\n");
-            }
             panic!("phys_to_virt overflow");
         }
     }
@@ -184,7 +176,8 @@ pub fn initialize_paging_aarch64<'a>(
     page_table.map_range(0xFFFF_0000_0900_0000, 0x0900_0000, 0x1000, device_flags()); // the UART
     page_table.map_range(0xFFFF_0000_0800_0000, 0x0800_0000, 0x10000, device_flags()); // the GICD
     page_table.map_range(0xFFFF_0000_0801_0000, 0x0801_0000, 0x10000, device_flags()); // the GICC
-    page_table.map_range(0xFFFF_0000_0a00_0000, 0x0a00_0000, 0x8000, device_flags()); // Virtio    setup_mair();
+    page_table.map_range(0xFFFF_0000_0a00_0000, 0x0a00_0000, 0x8000, device_flags()); // Virtio
+    setup_mair();
     setup_tcr();
 
     let stack_phys = KERNEL_STACK.0.as_ptr() as u64 - k_virt_base + k_phys_base;
@@ -259,6 +252,30 @@ impl AArchPageTable {
         unsafe {
             entry_ptr.write_volatile(phys | flags);
         }
+
+        if virt == USER_FB_BASE + 0x1000 {
+            serial_print("entry_ptr=");
+            serial_print(U64Buf::new(entry_ptr as u64).as_str());
+            serial_print(", virt=");
+            serial_print(U64Buf::new(virt as u64).as_str());
+            serial_print(", phys=");
+            serial_print(U64Buf::new(phys as u64).as_str());
+            serial_print(", l0=");
+            serial_print(U64Buf::new(l0 as u64).as_str());
+            serial_print(", l1=");
+            serial_print(U64Buf::new(l1 as u64).as_str());
+            serial_print(", l2=");
+            serial_print(U64Buf::new(l2 as u64).as_str());
+            serial_print(", l3=");
+            serial_print(U64Buf::new(l3 as u64).as_str());
+            serial_print(", flags=");
+            serial_print(U64Buf::new(flags).as_str());
+
+            let written = unsafe { entry_ptr.read_volatile() };
+            serial_print(", readback=");
+            serial_print(U64Buf::new(written).as_str());
+            serial_print("\n");
+        }
     }
 
     pub fn map_range(&self, virt: u64, phys: u64, size: u64, flags: u64) {
@@ -302,17 +319,12 @@ pub fn create_and_map_multiple_pages(
     base: u64,
     flags: u64,
 ) {
-    let mut frame_allocator = FRAME_ALLOCATOR_AARCH64.lock();
-
     for i in 0..page_count {
-        let frame = frame_allocator.allocate_frame().unwrap();
+        let frame = alloc_frame().unwrap();
 
         let virt = base + i as u64 * 4096;
-
         mapper.map_page(virt, frame, flags);
     }
 
     tlb_flush();
-
-    drop(frame_allocator);
 }

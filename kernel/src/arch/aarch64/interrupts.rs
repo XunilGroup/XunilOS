@@ -1,7 +1,7 @@
 use core::{arch::global_asm, sync::atomic::Ordering};
 
 use crate::{
-    arch::syscall::syscall_dispatch,
+    arch::syscall::{check_and_reschedule, syscall_dispatch},
     config::TIMER_FREQUENCY_HZ,
     driver::{
         graphics::framebuffer::with_framebuffer,
@@ -9,10 +9,8 @@ use crate::{
         serial::with_serial_console,
         timer::TIMER,
     },
-    task::context::UserContext,
+    task::context::{UserContext, ctx_save},
 };
-
-use aarch64_cpu::registers::{DAIF, Writeable};
 
 global_asm!(
     r#"
@@ -43,6 +41,12 @@ global_asm!(
   "#
 );
 
+fn timer_ticks_per_irq() -> u64 {
+    let cntfrq: u64;
+    unsafe { core::arch::asm!("mrs {}, cntfrq_el0", out(reg) cntfrq) };
+    cntfrq / (TIMER_FREQUENCY_HZ as u64)
+}
+
 // stp allows storing in pairs, ldp loads in pairs
 macro_rules! exception_handler {
     ($name:ident, $rust_handler:ident) => {
@@ -66,6 +70,8 @@ macro_rules! exception_handler {
                 "stp x24, x25, [sp, #192]",
                 "stp x26, x27, [sp, #208]",
                 "stp x28, x29, [sp, #224]",
+                "mrs x2, sp_el0",
+                "str x2, [sp, #280]",
                 "mrs x0, elr_el1",
                 "mrs x1, spsr_el1",
                 "stp x30, x0, [sp, #240]",
@@ -75,6 +81,8 @@ macro_rules! exception_handler {
                 "stp x2, x3, [sp, #264]",
                 "mov x0, sp",
                 concat!("bl ", stringify!($rust_handler)),
+                "ldr x2, [sp, #280]",
+                "msr sp_el0, x2",
                 "ldr x1, [sp, #256]",
                 "ldp x30, x0, [sp, #240]",
                 "msr spsr_el1, x1",
@@ -155,6 +163,7 @@ unsafe fn gic_eoi(id: u32) {
 pub fn init_interrupts() {
     unsafe { use_exception_vectors() };
     unsafe { gic_init() };
+    enable_interrupts();
     unsafe { core::arch::asm!("isb") };
 }
 
@@ -168,14 +177,14 @@ pub fn enable_interrupts() {
         gic_enable_interrupt(keyboard_irq as u32);
         gic_enable_interrupt(mouse_irq as u32);
 
+        let ticks = timer_ticks_per_irq();
+        core::arch::asm!("msr cntp_tval_el0, {}", in(reg) ticks);
         core::arch::asm!("msr cntp_ctl_el0, {}", in(reg) 1u64); // enable timer
     }
-    DAIF.write(DAIF::D::Masked + DAIF::A::Masked + DAIF::I::Unmasked + DAIF::F::Masked);
 }
 
 #[allow(unused_variables, dead_code)]
 #[unsafe(no_mangle)]
-
 unsafe extern "C" fn no_operation(ctx: *mut UserContext) {
     let interrupt_id = unsafe { gic_acknowledge() };
 
@@ -200,15 +209,14 @@ unsafe extern "C" fn irq_handler(ctx: *mut UserContext) {
 
             if t % 60 == 0 {
                 with_framebuffer(|fb| {
-                    with_serial_console(|serial_console| {
-                        serial_console.print(".", fb);
-                        serial_console.render(fb)
-                    });
+                    with_serial_console(|serial_console| serial_console.render(fb));
                     fb.present();
                 });
             }
 
-            unsafe { core::arch::asm!("msr cntp_tval_el0, {}", in(reg) TIMER_FREQUENCY_HZ) };
+            let ticks = timer_ticks_per_irq();
+            unsafe { core::arch::asm!("msr cntp_tval_el0, {}", in(reg) ticks) };
+            unsafe { core::arch::asm!("msr cntp_ctl_el0, {}", in(reg) 1u64) };
         }
         interrupt_id if keyboard_irq == interrupt_id as u64 => {
             input_interrupt("kbd");
@@ -227,13 +235,13 @@ unsafe extern "C" fn irq_handler(ctx: *mut UserContext) {
 
 fn handle_aborts(ec: u64, ctx: &UserContext) {
     match ec {
-        0x25 => {
+        ec if ec == 0x25 || ec == 0x24 => {
             panic!(
                 "Data abort at VA={:#x} ELR={:#x} ESR={:#x}",
                 ctx.far_el1, ctx.elr_el1, ctx.esr_el1
             );
         }
-        0x21 => {
+        ec if ec == 0x21 || ec == 0x20 => {
             panic!(
                 "Instruction abort at VA={:#x} ELR={:#x}",
                 ctx.far_el1, ctx.elr_el1
@@ -241,8 +249,8 @@ fn handle_aborts(ec: u64, ctx: &UserContext) {
         }
         _ => {
             panic!(
-                "Unhandled sync abort VA={:#x} ELR={:#x} ESR={:#x}",
-                ctx.far_el1, ctx.elr_el1, ctx.esr_el1
+                "Unhandled sync abort VA={:#x} ELR={:#x} ESR={:#x}, ec={:#x}",
+                ctx.far_el1, ctx.elr_el1, ctx.esr_el1, ec
             );
         }
     }
@@ -250,10 +258,9 @@ fn handle_aborts(ec: u64, ctx: &UserContext) {
 
 #[unsafe(no_mangle)]
 unsafe extern "C" fn sync_handler_user(ctx: *mut UserContext) {
-    let mut ctx = unsafe { *ctx };
+    let ctx = unsafe { &mut *ctx };
     let ec = (ctx.esr_el1 >> ESR_EC_SHIFT) & ESR_EC_MASK;
 
-    #[allow(unused_assignments)]
     match ec {
         EC_SVC_AA64 => {
             ctx.x0 = unsafe {
@@ -267,9 +274,13 @@ unsafe extern "C" fn sync_handler_user(ctx: *mut UserContext) {
                     ctx.x5 as isize,
                 )
             } as u64;
+
+            ctx_save(ctx as *const UserContext);
+
+            let _ = unsafe { check_and_reschedule() };
         }
-        _ => handle_aborts(ec, &ctx),
-    }
+        _ => handle_aborts(ec, ctx),
+    };
 }
 
 #[unsafe(no_mangle)]
@@ -277,6 +288,37 @@ unsafe extern "C" fn sync_handler_kernel(ctx: *mut UserContext) {
     let ctx = unsafe { *ctx };
     let ec = (ctx.esr_el1 >> ESR_EC_SHIFT) & ESR_EC_MASK;
     handle_aborts(ec, &ctx)
+}
+
+#[unsafe(naked)]
+#[unsafe(no_mangle)]
+pub unsafe fn run_next(ctx: *const UserContext, user_sp: u64) {
+    core::arch::naked_asm!(
+        "mov x30, x0",
+        "msr sp_el0, x1",
+        "ldr x2, [x30, #248]",
+        "msr elr_el1, x2",
+        "ldr x3, [x30, #256]",
+        "msr spsr_el1, x3",
+        "ldp x0, x1, [x30, #0]",
+        "ldp x2, x3, [x30, #16]",
+        "ldp x4, x5, [x30, #32]",
+        "ldp x6, x7, [x30, #48]",
+        "ldp x8, x9, [x30, #64]",
+        "ldp x10, x11, [x30, #80]",
+        "ldp x12, x13, [x30, #96]",
+        "ldp x14, x15, [x30, #112]",
+        "ldp x16, x17, [x30, #128]",
+        "ldp x18, x19, [x30, #144]",
+        "ldp x20, x21, [x30, #160]",
+        "ldp x22, x23, [x30, #176]",
+        "ldp x24, x25, [x30, #192]",
+        "ldp x26, x27, [x30, #208]",
+        "ldp x28, x29, [x30, #224]",
+        "ldr x30, [x30, #240]",
+        "isb",
+        "eret"
+    );
 }
 
 // these are UB and should not happen

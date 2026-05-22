@@ -1,4 +1,5 @@
 use crate::alloc::string::ToString;
+use crate::arch::arch::serial_print;
 use crate::driver::graphics::font_render::render_text;
 use crate::driver::graphics::framebuffer::Framebuffer;
 use crate::{arch::arch::safe_lock, driver::graphics::base::rgb};
@@ -14,6 +15,7 @@ pub struct ConsoleWriter<'a> {
 
 impl Write for ConsoleWriter<'_> {
     fn write_str(&mut self, s: &str) -> fmt::Result {
+        serial_print(s);
         self.console.print(s, self.fb);
         Ok(())
     }

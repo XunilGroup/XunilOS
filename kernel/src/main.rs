@@ -2,54 +2,48 @@
 #![no_main]
 #![cfg_attr(target_arch = "x86_64", feature(abi_x86_interrupt))]
 #![feature(naked_functions_rustic_abi)]
+
 extern crate alloc;
+
 use core::fmt::Write;
 use core::sync::atomic::{AtomicU64, Ordering};
 
-#[cfg(target_arch = "aarch64")]
-use crate::arch::aarch64::interrupts::enable_interrupts;
+use limine::{
+    BaseRevision,
+    request::{
+        DateAtBootRequest, ExecutableAddressRequest, FramebufferRequest, HhdmRequest,
+        MemoryMapRequest, RequestsEndMarker, RequestsStartMarker,
+    },
+};
+
 #[cfg(target_arch = "aarch64")]
 use crate::arch::aarch64::paging::AArchPageTable;
 #[cfg(target_arch = "aarch64")]
-use crate::driver::graphics::primitives::rectangle_filled;
+use crate::driver::{graphics::primitives::rectangle_filled, io::virtio::input::init_keyboard};
 #[cfg(target_arch = "aarch64")]
 use aarch64_cpu::registers::{DAIF, Writeable};
 
-#[cfg(target_arch = "aarch64")]
-use crate::driver::io::virtio::input::init_keyboard;
-
-#[cfg(target_arch = "x86_64")]
-use crate::driver::elf::loader::run_elf;
 #[cfg(target_arch = "x86_64")]
 use crate::driver::io::ps2::init_keyboard;
 
 use crate::arch::arch::{HHDM_OFFSET, infinite_idle, init, kernel_crash, serial_print};
-
-use crate::driver::graphics::base::rgb;
-use crate::driver::graphics::framebuffer::{init_framebuffer, with_framebuffer};
-
-use crate::driver::serial::{ConsoleWriter, init_serial_console, with_serial_console};
-use crate::driver::timer::TIMER;
-
-use limine::BaseRevision;
-use limine::request::{
-    DateAtBootRequest, ExecutableAddressRequest, FramebufferRequest, HhdmRequest, MemoryMapRequest,
-    RequestsEndMarker, RequestsStartMarker,
+use crate::driver::{
+    elf::loader::run_elf,
+    graphics::{
+        base::rgb,
+        framebuffer::{init_framebuffer, with_framebuffer},
+    },
+    io::fs::assets::INIT_ELF,
+    serial::{ConsoleWriter, init_serial_console, with_serial_console},
+    timer::TIMER,
 };
+
 pub mod arch;
 pub mod config;
 pub mod driver;
 pub mod mm;
 pub mod task;
 pub mod util;
-
-#[repr(C, align(16))]
-#[allow(dead_code)]
-struct AlignedElf([u8; include_bytes!("../../assets/init").len()]);
-#[allow(dead_code)]
-static INIT_ELF: AlignedElf = AlignedElf(*include_bytes!("../../assets/init"));
-#[allow(dead_code)]
-static INIT_ELF_BYTES: &[u8] = &INIT_ELF.0;
 
 /// Sets the base revision to the latest revision supported by the crate.
 /// See specification for further info.
@@ -200,13 +194,9 @@ pub unsafe extern "C" fn kernel_main_aarch64(mapper: &mut AArchPageTable) -> ! {
         println!("Could not get date at boot. Will default to 0.")
     }
 
-    println!("Hello from Aarch64!");
-    with_framebuffer(|fb| {
-        with_serial_console(|sc| sc.render(fb));
-        rectangle_filled(fb, 100, 100, 20, 20, rgb(255, 255, 255));
-    });
+    DAIF.write(DAIF::D::Masked + DAIF::A::Masked + DAIF::I::Unmasked + DAIF::F::Masked);
 
-    enable_interrupts();
+    run_elf(INIT_ELF, false, true);
 
     loop {}
 }
@@ -217,20 +207,24 @@ pub unsafe fn kernel_main_x86_64() -> ! {
     // removed by the linker.
     assert!(BASE_REVISION.is_supported());
 
-    if let Some(hhdm_response) = HHDM_REQUEST.get_response() {
-        if let Some(memory_map_response) = MEMORY_MAP_REQUEST.get_response() {
-            init(hhdm_response, memory_map_response);
+    let (hhdm_response, memory_map_response) = {
+        if let Some(a) = HHDM_REQUEST.get_response() {
+            if let Some(b) = MEMORY_MAP_REQUEST.get_response() {
+                (a, b)
+            } else {
+                kernel_crash(); // Could not get required info from Limine's memory map.
+            }
         } else {
-            kernel_crash(); // Could not get required info from Limine's memory map.
+            kernel_crash(); // Could not get required info from Limine's higher-half direct mapping.
         }
-    } else {
-        kernel_crash(); // Could not get required info from Limine's higher-half direct mapping.
-    }
+    };
+
+    let mut mapper = init(hhdm_response, memory_map_response);
 
     if let Some(framebuffer_response) = FRAMEBUFFER_REQUEST.get_response() {
         if let Some(limine_framebuffer) = framebuffer_response.framebuffers().next() {
             init_framebuffer(&limine_framebuffer);
-            with_framebuffer(|fb| fb.setup_x86_64());
+            with_framebuffer(|fb| fb.setup_x86_64(&mut mapper));
         } else {
             serial_print("no framebuffers found");
         }
@@ -246,7 +240,7 @@ pub unsafe fn kernel_main_x86_64() -> ! {
         println!("Could not get date at boot. Will default to 0.")
     }
 
-    run_elf(INIT_ELF_BYTES, false);
+    run_elf(INIT_ELF, false, true);
 
     loop {}
 }
@@ -276,6 +270,12 @@ impl core::fmt::Write for BufWriter<'_> {
 #[panic_handler]
 fn rust_panic(_info: &core::panic::PanicInfo) -> ! {
     serial_print("\nKERNEL PANIC:\n");
+    serial_print(
+        _info
+            .message()
+            .as_str()
+            .unwrap_or("Could not get message str"),
+    );
     let mut buf = [0u8; 512];
     let msg = {
         let mut w = BufWriter::new(&mut buf);

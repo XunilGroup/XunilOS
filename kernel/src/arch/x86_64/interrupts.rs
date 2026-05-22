@@ -1,7 +1,7 @@
 use core::sync::atomic::Ordering;
 
 use crate::{
-    arch::x86_64::gdt,
+    arch::{arch::serial_print, x86_64::gdt},
     driver::{
         graphics::framebuffer::with_framebuffer,
         io::ps2::{keyboard_interrupt, mouse_interrupt, push_scancode},
@@ -9,6 +9,7 @@ use crate::{
         timer::TIMER,
     },
     println,
+    util::U64Buf,
 };
 use lazy_static::lazy_static;
 use pic8259::ChainedPics;

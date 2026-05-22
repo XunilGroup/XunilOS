@@ -15,6 +15,14 @@ fn main() {
     )
     .unwrap();
 
+    let out_dir = out_dir.join("driver").join("io").join("fs");
+
+    fs::write(
+        out_dir.join("assets.rs"),
+        format!("pub static INIT_ELF: &[u8] = include_bytes!(\"../../../../../assets/{karch}/init\");\npub static DOOM_WAD: &[u8] = include_bytes!(\"../../../../../assets/doom1.wad\");\npub static DOOM_ELF: &[u8] = include_bytes!(\"../../../../../assets/{karch}/doomgeneric\");\npub static HELLOWORLD_ELF: &[u8] = include_bytes!(\"../../../../../assets/{karch}/helloworld.elf\");"),
+    )
+    .unwrap();
+
     println!("cargo:rerun-if-env-changed=KARCH");
     println!("cargo:rerun-if-env-changed=TIMER_FREQUENCY_HZ");
     println!("cargo:rerun-if-env-changed=OUTPUT");

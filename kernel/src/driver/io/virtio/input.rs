@@ -196,18 +196,15 @@ pub fn input_interrupt(device_type: &str) {
 
         let event = unsafe { core::ptr::read_volatile(&queue.buffers[desc_idx as usize]) };
 
+        handle_event(&event);
+
         let avail_idx = unsafe { core::ptr::read_volatile(&queue.avail.idx) };
         queue.avail.ring[(avail_idx as usize) % QUEUE_SIZE] = desc_idx as u16;
 
         core::sync::atomic::fence(core::sync::atomic::Ordering::SeqCst);
-
         unsafe {
             core::ptr::write_volatile(&mut queue.avail.idx, avail_idx.wrapping_add(1));
         }
-
-        device.write(VirtioMmioReg::QueueNotify, 0);
-
-        handle_event(&event);
     }
 }
 

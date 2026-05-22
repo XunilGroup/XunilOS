@@ -1,3 +1,4 @@
+use crate::driver::io::fs::assets::*;
 use core::ptr::{null, null_mut};
 
 #[repr(C)]
@@ -37,10 +38,6 @@ const MAX_FD: usize = 16;
 fn fd_ok(fd: Fd) -> bool {
     fd >= 0 && (fd as usize) < MAX_FD
 }
-
-static DOOM_WAD: &[u8] = include_bytes!("../../../../../assets/doom1.wad");
-static DOOM_ELF: &[u8] = include_bytes!("../../../../../assets/doomgeneric");
-static HELLOWORLD_ELF: &[u8] = include_bytes!("../../../../../assets/helloworld.elf");
 
 static FILES: &[FakeFileEntry] = &[
     FakeFileEntry {

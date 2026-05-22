@@ -1,2 +1,2 @@
 cd user/libxunil
-cargo build --release
+cargo build --target $KARCH-unknown-none --release --config profile.release.debug=true

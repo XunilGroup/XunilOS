@@ -28,6 +28,16 @@ run-x86_64: edk2-ovmf $(IMAGE_NAME).iso
 		-cdrom $(IMAGE_NAME).iso \
 		$(QEMUFLAGS)
 
+.PHONY: debug-x86_64
+debug-x86_64: edk2-ovmf $(IMAGE_NAME).iso
+	qemu-system-$(KARCH) \
+		-M q35 \
+		-serial stdio \
+		-drive if=pflash,unit=0,format=raw,file=edk2-ovmf/ovmf-code-$(KARCH).fd,readonly=on \
+		-cdrom $(IMAGE_NAME).iso \
+		-d in_asm,int,mmu -D /tmp/qemu_trace.log 2>/dev/null \
+		$(QEMUFLAGS)
+
 .PHONY: run-hdd-x86_64
 run-hdd-x86_64: edk2-ovmf $(IMAGE_NAME).hdd
 	qemu-system-$(KARCH) \
@@ -51,6 +61,24 @@ run-aarch64: edk2-ovmf $(IMAGE_NAME).iso
 		-drive if=pflash,unit=0,format=raw,file=edk2-ovmf/ovmf-code-$(KARCH).fd,readonly=on \
 		-cdrom $(IMAGE_NAME).iso \
 		-semihosting-config enable=on,target=native \
+		$(QEMUFLAGS)
+
+.PHONY: debug-aarch64
+debug-aarch64: edk2-ovmf $(IMAGE_NAME).iso
+	qemu-system-$(KARCH) \
+		-M virt,gic-version=2,secure=off \
+		-cpu cortex-a72 \
+		-device ramfb \
+		-device qemu-xhci \
+		-device usb-kbd \
+		-device usb-mouse \
+		-device virtio-keyboard-device \
+		-device virtio-mouse-device \
+		-serial stdio \
+		-drive if=pflash,unit=0,format=raw,file=edk2-ovmf/ovmf-code-$(KARCH).fd,readonly=on \
+		-cdrom $(IMAGE_NAME).iso \
+		-semihosting-config enable=on,target=native \
+		-d in_asm,int,mmu -D /tmp/qemu_trace.log 2>/dev/null
 		$(QEMUFLAGS)
 
 .PHONY: run-hdd-aarch64

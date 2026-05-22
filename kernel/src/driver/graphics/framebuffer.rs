@@ -1,5 +1,7 @@
 use limine::framebuffer::Framebuffer as LimineFramebuffer;
 use spin::Mutex;
+#[cfg(target_arch = "x86_64")]
+use x86_64::structures::paging::OffsetPageTable;
 
 use crate::arch::arch::safe_lock;
 
@@ -53,9 +55,19 @@ impl Framebuffer {
     }
 
     #[cfg(target_arch = "x86_64")]
-    pub fn setup_x86_64(&mut self) {
-        use crate::arch::arch::{FRAME_ALLOCATOR, HHDM_OFFSET};
-        use x86_64::structures::paging::{FrameAllocator, PhysFrame, Size4KiB};
+    pub fn setup_x86_64(&mut self, mapper: &mut OffsetPageTable) {
+        use crate::{
+            arch::arch::{FRAME_ALLOCATOR, HHDM_OFFSET, serial_print},
+            arch::x86_64::paging::initialize_paging_x86_64,
+            util::U64Buf,
+        };
+        use x86_64::{
+            PhysAddr, VirtAddr,
+            structures::paging::{
+                FrameAllocator, Mapper, Page, PageTableFlags, PhysFrame, Size4KiB,
+            },
+        };
+        const KERNEL_FB_BASE: u64 = 0xffffffffa0000000;
         let buf_len = self.pitch * self.height;
         let byte_len = buf_len * core::mem::size_of::<u32>();
         let pixel_frames = (byte_len + 4095) / 4096;
@@ -65,8 +77,6 @@ impl Framebuffer {
         let struct_frame: PhysFrame<Size4KiB> =
             fa.allocate_frame().expect("framebuffer struct frame");
         let struct_phys = struct_frame.start_address().as_u64();
-        let hhdm_offset = HHDM_OFFSET.load(core::sync::atomic::Ordering::Relaxed);
-        let struct_virt = (struct_phys + hhdm_offset) as *mut UserFrameBuffer;
 
         let first_pixel_frame: PhysFrame<Size4KiB> =
             fa.allocate_frame().expect("framebuffer pixel frame 0");
@@ -74,7 +84,33 @@ impl Framebuffer {
         for _ in 1..pixel_frames {
             fa.allocate_frame().expect("framebuffer pixel frame");
         }
-        let buf_virt_kernel = (buf_phys + hhdm_offset) as *mut u32;
+
+        let hhdm_offset = HHDM_OFFSET.load(core::sync::atomic::Ordering::Relaxed);
+
+        let flags = PageTableFlags::PRESENT | PageTableFlags::WRITABLE | PageTableFlags::NO_EXECUTE;
+
+        let struct_page = Page::<Size4KiB>::containing_address(VirtAddr::new(KERNEL_FB_BASE));
+        unsafe {
+            mapper
+                .map_to(struct_page, struct_frame, flags, &mut *fa)
+                .unwrap()
+                .flush();
+        }
+
+        for i in 0..pixel_frames {
+            let frame = PhysFrame::<Size4KiB>::containing_address(PhysAddr::new(
+                buf_phys + i as u64 * 4096,
+            ));
+            let page = Page::<Size4KiB>::containing_address(VirtAddr::new(
+                KERNEL_FB_BASE + 0x1000 + i as u64 * 4096,
+            ));
+            unsafe {
+                mapper.map_to(page, frame, flags, &mut *fa).unwrap().flush();
+            }
+        }
+
+        let struct_virt = KERNEL_FB_BASE as *mut UserFrameBuffer;
+        let buf_virt_kernel = (KERNEL_FB_BASE + 0x1000) as *mut u32;
         drop(fa);
 
         unsafe { core::ptr::write_bytes(buf_virt_kernel, 0, buf_len) };

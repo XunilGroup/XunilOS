@@ -62,7 +62,7 @@ pub struct UserContext {
     pub spsr_el1: u64,
     pub esr_el1: u64, // exception type
     pub far_el1: u64, // fault type
-    _pad: u64,
+    pub sp_el0: u64,
 }
 
 #[unsafe(no_mangle)]

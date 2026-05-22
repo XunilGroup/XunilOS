@@ -47,7 +47,10 @@ pub fn set_pit_interval() {
     });
 }
 
-pub fn init_x86_64<'a>(hhdm_response: &HhdmResponse, memory_map_response: &'a MemoryMapResponse) {
+pub fn init_x86_64<'a>(
+    hhdm_response: &HhdmResponse,
+    memory_map_response: &'a MemoryMapResponse,
+) -> OffsetPageTable<'a> {
     load_gdt_x86_64();
 
     unsafe {
@@ -87,4 +90,6 @@ pub fn init_x86_64<'a>(hhdm_response: &HhdmResponse, memory_map_response: &'a Me
         .expect("Failed to initalize heap");
 
     MOUSE.set_status(kmi_status);
+
+    return mapper;
 }
