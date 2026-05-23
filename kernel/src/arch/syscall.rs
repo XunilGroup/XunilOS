@@ -455,11 +455,6 @@ pub unsafe extern "C" fn syscall_dispatch(
 ) -> isize {
     #[cfg(target_arch = "x86_64")]
     interrupts::enable();
-    // if num != 1 {
-    //     serial_print("syscall num=");
-    //     serial_print(U64Buf::new(num as u64).as_str());
-    //     serial_print("\n");
-    // }
 
     set_reschedule(match num {
         BRK => false,

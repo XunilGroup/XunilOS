@@ -10,14 +10,8 @@ override IMAGE_NAME := XunilOS-$(KARCH)
 .PHONY: all
 all: $(IMAGE_NAME).iso
 
-.PHONY: all-hdd
-all-hdd: $(IMAGE_NAME).hdd
-
 .PHONY: run
 run: run-$(KARCH)
-
-.PHONY: run-hdd
-run-hdd: run-hdd-$(KARCH)
 
 .PHONY: run-x86_64
 run-x86_64: edk2-ovmf $(IMAGE_NAME).iso
@@ -35,15 +29,7 @@ debug-x86_64: edk2-ovmf $(IMAGE_NAME).iso
 		-serial stdio \
 		-drive if=pflash,unit=0,format=raw,file=edk2-ovmf/ovmf-code-$(KARCH).fd,readonly=on \
 		-cdrom $(IMAGE_NAME).iso \
-		-d in_asm,int,mmu -D /tmp/qemu_trace.log 2>/dev/null \
-		$(QEMUFLAGS)
-
-.PHONY: run-hdd-x86_64
-run-hdd-x86_64: edk2-ovmf $(IMAGE_NAME).hdd
-	qemu-system-$(KARCH) \
-		-M q35 \
-		-drive if=pflash,unit=0,format=raw,file=edk2-ovmf/ovmf-code-$(KARCH).fd,readonly=on \
-		-hda $(IMAGE_NAME).hdd \
+		-d in_asm,int,mmu -dfilter 0xffffffff80000000..0xffffffff80010000 -D /tmp/qemu_trace.log 2>/dev/null \
 		$(QEMUFLAGS)
 
 .PHONY: run-aarch64
@@ -78,88 +64,7 @@ debug-aarch64: edk2-ovmf $(IMAGE_NAME).iso
 		-drive if=pflash,unit=0,format=raw,file=edk2-ovmf/ovmf-code-$(KARCH).fd,readonly=on \
 		-cdrom $(IMAGE_NAME).iso \
 		-semihosting-config enable=on,target=native \
-		-d in_asm,int,mmu -D /tmp/qemu_trace.log 2>/dev/null
-		$(QEMUFLAGS)
-
-.PHONY: run-hdd-aarch64
-run-hdd-aarch64: edk2-ovmf $(IMAGE_NAME).hdd
-	qemu-system-$(KARCH) \
-		-M virt \
-		-cpu cortex-a72 \
-		-device ramfb \
-		-device qemu-xhci \
-		-device usb-kbd \
-		-device usb-mouse \
-		-drive if=pflash,unit=0,format=raw,file=edk2-ovmf/ovmf-code-$(KARCH).fd,readonly=on \
-		-hda $(IMAGE_NAME).hdd \
-		$(QEMUFLAGS)
-
-.PHONY: run-riscv64
-run-riscv64: edk2-ovmf $(IMAGE_NAME).iso
-	qemu-system-$(KARCH) \
-		-M virt \
-		-cpu rv64 \
-		-device ramfb \
-		-device qemu-xhci \
-		-device usb-kbd \
-		-device usb-mouse \
-		-drive if=pflash,unit=0,format=raw,file=edk2-ovmf/ovmf-code-$(KARCH).fd,readonly=on \
-		-cdrom $(IMAGE_NAME).iso \
-		$(QEMUFLAGS)
-
-.PHONY: run-hdd-riscv64
-run-hdd-riscv64: edk2-ovmf $(IMAGE_NAME).hdd
-	qemu-system-$(KARCH) \
-		-M virt \
-		-cpu rv64 \
-		-device ramfb \
-		-device qemu-xhci \
-		-device usb-kbd \
-		-device usb-mouse \
-		-drive if=pflash,unit=0,format=raw,file=edk2-ovmf/ovmf-code-$(KARCH).fd,readonly=on \
-		-hda $(IMAGE_NAME).hdd \
-		$(QEMUFLAGS)
-
-.PHONY: run-loongarch64
-run-loongarch64: edk2-ovmf $(IMAGE_NAME).iso
-	qemu-system-$(KARCH) \
-		-M virt \
-		-cpu la464 \
-		-device ramfb \
-		-device qemu-xhci \
-		-device usb-kbd \
-		-device usb-mouse \
-		-drive if=pflash,unit=0,format=raw,file=edk2-ovmf/ovmf-code-$(KARCH).fd,readonly=on \
-		-cdrom $(IMAGE_NAME).iso \
-		$(QEMUFLAGS)
-
-.PHONY: run-hdd-loongarch64
-run-hdd-loongarch64: edk2-ovmf $(IMAGE_NAME).hdd
-	qemu-system-$(KARCH) \
-		-M virt \
-		-cpu la464 \
-		-device ramfb \
-		-device qemu-xhci \
-		-device usb-kbd \
-		-device usb-mouse \
-		-drive if=pflash,unit=0,format=raw,file=edk2-ovmf/ovmf-code-$(KARCH).fd,readonly=on \
-		-hda $(IMAGE_NAME).hdd \
-		$(QEMUFLAGS)
-
-
-.PHONY: run-bios
-run-bios: $(IMAGE_NAME).iso
-	qemu-system-$(KARCH) \
-		-M q35 \
-		-cdrom $(IMAGE_NAME).iso \
-		-boot d \
-		$(QEMUFLAGS)
-
-.PHONY: run-hdd-bios
-run-hdd-bios: $(IMAGE_NAME).hdd
-	qemu-system-$(KARCH) \
-		-M q35 \
-		-hda $(IMAGE_NAME).hdd \
+		-d in_asm,int,mmu -dfilter 0xffffffff80000000..0xffffffff80010000 -D /tmp/qemu_trace.log 2>/dev/null \
 		$(QEMUFLAGS)
 
 edk2-ovmf:
@@ -218,36 +123,10 @@ ifeq ($(KARCH),loongarch64)
 endif
 	rm -rf iso_root
 
-$(IMAGE_NAME).hdd: limine/limine kernel
-	rm -f $(IMAGE_NAME).hdd
-	dd if=/dev/zero bs=1M count=0 seek=64 of=$(IMAGE_NAME).hdd
-	sgdisk $(IMAGE_NAME).hdd -n 1:2048 -t 1:ef00
-ifeq ($(KARCH),x86_64)
-	./limine/limine bios-install $(IMAGE_NAME).hdd
-endif
-	mformat -i $(IMAGE_NAME).hdd@@1M
-	mmd -i $(IMAGE_NAME).hdd@@1M ::/EFI ::/EFI/BOOT ::/boot ::/boot/limine
-	mcopy -i $(IMAGE_NAME).hdd@@1M kernel/bin-$(KARCH)/kernel ::/boot
-	mcopy -i $(IMAGE_NAME).hdd@@1M limine.conf ::/boot/limine
-ifeq ($(KARCH),x86_64)
-	mcopy -i $(IMAGE_NAME).hdd@@1M limine/limine-bios.sys ::/boot/limine
-	mcopy -i $(IMAGE_NAME).hdd@@1M limine/BOOTX64.EFI ::/EFI/BOOT
-	mcopy -i $(IMAGE_NAME).hdd@@1M limine/BOOTIA32.EFI ::/EFI/BOOT
-endif
-ifeq ($(KARCH),aarch64)
-	mcopy -i $(IMAGE_NAME).hdd@@1M limine/BOOTAA64.EFI ::/EFI/BOOT
-endif
-ifeq ($(KARCH),riscv64)
-	mcopy -i $(IMAGE_NAME).hdd@@1M limine/BOOTRISCV64.EFI ::/EFI/BOOT
-endif
-ifeq ($(KARCH),loongarch64)
-	mcopy -i $(IMAGE_NAME).hdd@@1M limine/BOOTLOONGARCH64.EFI ::/EFI/BOOT
-endif
-
 .PHONY: clean
 clean:
 	$(MAKE) -C kernel clean
-	rm -rf iso_root $(IMAGE_NAME).iso $(IMAGE_NAME).hdd
+	rm -rf iso_root $(IMAGE_NAME).iso
 
 .PHONY: distclean
 distclean: clean

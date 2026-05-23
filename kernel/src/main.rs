@@ -180,10 +180,11 @@ pub unsafe extern "C" fn kernel_main_aarch64(mapper: &mut AArchPageTable) -> ! {
             init_framebuffer(&limine_framebuffer);
             with_framebuffer(|fb| fb.setup_aarch64());
         } else {
-            serial_print("no framebuffers found");
+            panic!("no framebuffers found");
         }
+    } else {
+        panic!("no framebuffers found");
     }
-
     init_serial_console();
 
     init_keyboard();
@@ -193,7 +194,6 @@ pub unsafe extern "C" fn kernel_main_aarch64(mapper: &mut AArchPageTable) -> ! {
     } else {
         println!("Could not get date at boot. Will default to 0.")
     }
-
     DAIF.write(DAIF::D::Masked + DAIF::A::Masked + DAIF::I::Unmasked + DAIF::F::Masked);
 
     run_elf(INIT_ELF, false, true);

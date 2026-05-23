@@ -7,3 +7,6 @@
 [submodule "user/init"]
 	path = user/init
 	url = git@github.com:XunilGroup/xunil-init.git
+[submodule "user/apps/badapple"]
+	path = user/apps/badapple
+	url = https://github.com/XunilGroup/xunil_badapple.git

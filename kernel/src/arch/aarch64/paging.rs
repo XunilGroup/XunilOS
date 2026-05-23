@@ -1,12 +1,8 @@
 use core::sync::atomic::Ordering;
 
-use crate::{
-    arch::{
-        aarch64::init::KERNEL_STACK,
-        arch::{HHDM_OFFSET, XunilFrameAllocator, safe_lock, serial_print},
-    },
-    driver::graphics::framebuffer::USER_FB_BASE,
-    util::U64Buf,
+use crate::arch::{
+    aarch64::init::KERNEL_STACK,
+    arch::{HHDM_OFFSET, XunilFrameAllocator, safe_lock},
 };
 use limine::{
     memory_map::EntryType,

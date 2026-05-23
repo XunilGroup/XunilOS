@@ -49,6 +49,10 @@ static FILES: &[FakeFileEntry] = &[
         data: HELLOWORLD_ELF,
     },
     FakeFileEntry {
+        name: "badapple",
+        data: BADAPPLE_ELF,
+    },
+    FakeFileEntry {
         name: "doomgeneric",
         data: DOOM_ELF,
     },

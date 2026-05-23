@@ -15,7 +15,6 @@ pub struct ConsoleWriter<'a> {
 
 impl Write for ConsoleWriter<'_> {
     fn write_str(&mut self, s: &str) -> fmt::Result {
-        serial_print(s);
         self.console.print(s, self.fb);
         Ok(())
     }
@@ -31,12 +30,17 @@ impl SerialConsole {
     pub fn new() -> SerialConsole {
         SerialConsole {
             text: String::new(),
-            font_size: 2,
+            font_size: 1,
             dirty: false,
         }
     }
 
     pub fn print(&mut self, text: &str, fb: &mut Framebuffer) {
+        if text == "\x1b[2J" {
+            self.text.clear();
+            return;
+        }
+
         let max_height = fb.height / (12 * self.font_size);
         let max_width = fb.width / (8 * self.font_size);
 
