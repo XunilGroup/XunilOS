@@ -1,4 +1,8 @@
+use core::mem::MaybeUninit;
+
+use alloc::boxed::Box;
 use lazy_static::lazy_static;
+use spin::mutex::Mutex;
 use x86_64::VirtAddr;
 use x86_64::instructions::segmentation::{CS, DS, ES, SS, Segment};
 use x86_64::instructions::tables::load_tss;
@@ -6,31 +10,35 @@ use x86_64::structures::{
     gdt::{Descriptor, GlobalDescriptorTable, SegmentSelector},
     tss::TaskStateSegment,
 };
-
+pub const TIMER_IST_INDEX: u16 = 1;
 pub const DOUBLE_FAULT_IST_INDEX: u16 = 0;
 
-lazy_static! {
-    #[repr(C, align(4096))]
-    pub static ref TSS: TaskStateSegment = {
-        let mut tss = TaskStateSegment::new();
-        tss.interrupt_stack_table[DOUBLE_FAULT_IST_INDEX as usize] = {
-            const STACK_SIZE: usize = 4096 * 5;
-            static mut STACK: [u8; STACK_SIZE] = [0; STACK_SIZE];
+pub static TSS_MUTEX: Mutex<Option<&'static mut TaskStateSegment>> = Mutex::new(None);
 
-            let stack_start = VirtAddr::from_ptr(&raw const STACK);
-            let stack_end = stack_start + STACK_SIZE as u64;
-            stack_end
-        };
-        tss.privilege_stack_table[0] = {
-            const STACK_SIZE: usize = 4096 * 5;
-            static mut STACK: [u8; STACK_SIZE] = [0; STACK_SIZE];
+#[allow(static_mut_refs)]
+fn make_tss() -> &'static mut TaskStateSegment {
+    static mut TSS_STORAGE: MaybeUninit<TaskStateSegment> = MaybeUninit::uninit();
 
-            let stack_start = VirtAddr::from_ptr(&raw const STACK);
-            let stack_end = stack_start + STACK_SIZE as u64;
-            stack_end
-        };
+    unsafe {
+        let tss_ptr = TSS_STORAGE.as_mut_ptr();
+        tss_ptr.write(TaskStateSegment::new());
+        let tss: &mut TaskStateSegment = &mut *tss_ptr;
+
+        const STACK_SIZE: usize = 4096 * 5;
+        static mut DOUBLE_FAULT_STACK: [u8; STACK_SIZE] = [0; STACK_SIZE];
+        let df_start = VirtAddr::from_ptr(&DOUBLE_FAULT_STACK as *const _);
+        tss.interrupt_stack_table[DOUBLE_FAULT_IST_INDEX as usize] = df_start + STACK_SIZE as u64;
+
+        static mut PRIVILEGE_STACK: [u8; STACK_SIZE] = [0; STACK_SIZE];
+        let p_start = VirtAddr::from_ptr(&PRIVILEGE_STACK as *const _);
+        tss.privilege_stack_table[0] = p_start + STACK_SIZE as u64;
+
+        static mut TIMER_IST_STACK: [u8; STACK_SIZE] = [0; STACK_SIZE];
+        let ti_start = VirtAddr::from_ptr(&TIMER_IST_STACK as *const _);
+        tss.interrupt_stack_table[TIMER_IST_INDEX as usize] = ti_start + STACK_SIZE as u64;
+
         tss
-    };
+    }
 }
 
 lazy_static! {
@@ -45,6 +53,10 @@ lazy_static! {
             SegmentSelector
         )
     ) = {
+        let tss: &'static mut TaskStateSegment = make_tss();
+        let tss_ptr: *mut TaskStateSegment = tss as *mut _;
+        *TSS_MUTEX.lock() = Some(tss);
+
         let mut gdt = GlobalDescriptorTable::new();
         let kernel_code_selector = gdt.append(Descriptor::kernel_code_segment());
         let kernel_data_selector = gdt.append(Descriptor::kernel_data_segment());
@@ -59,7 +71,10 @@ lazy_static! {
 
         let user_data_selector = gdt.append(Descriptor::user_data_segment());
         let user_code_selector = gdt.append(Descriptor::user_code_segment());
-        let tss_selector = gdt.append(Descriptor::tss_segment(&TSS));
+
+        let tss_ref: &'static TaskStateSegment = unsafe { &*tss_ptr };
+        let tss_selector = gdt.append(Descriptor::tss_segment(tss_ref));
+
         (
             gdt,
             (

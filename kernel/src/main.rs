@@ -18,8 +18,12 @@ use limine::{
 
 #[cfg(target_arch = "aarch64")]
 use crate::arch::aarch64::paging::AArchPageTable;
+#[cfg(target_arch = "x86_64")]
+use crate::arch::arch::KERNEL_MAPPER;
 #[cfg(target_arch = "aarch64")]
-use crate::driver::{graphics::primitives::rectangle_filled, io::virtio::input::init_keyboard};
+use crate::driver::io::virtio::input::init_keyboard;
+#[cfg(target_arch = "aarch64")]
+use crate::util::U64Buf;
 #[cfg(target_arch = "aarch64")]
 use aarch64_cpu::registers::{DAIF, Writeable};
 
@@ -30,8 +34,8 @@ use crate::arch::arch::{HHDM_OFFSET, infinite_idle, init, kernel_crash, serial_p
 use crate::driver::{
     elf::loader::run_elf,
     graphics::{
-        base::rgb,
         framebuffer::{init_framebuffer, with_framebuffer},
+        rgb,
     },
     io::fs::assets::INIT_ELF,
     serial::{ConsoleWriter, init_serial_console, with_serial_console},
@@ -233,6 +237,11 @@ pub unsafe fn kernel_main_x86_64() -> ! {
     init_serial_console();
 
     init_keyboard();
+
+    #[allow(static_mut_refs)]
+    unsafe {
+        *KERNEL_MAPPER.get_mut() = Some(mapper)
+    };
 
     if let Some(date_at_boot_response) = DATE_AT_BOOT_REQUEST.get_response() {
         TIMER.set_date_at_boot(date_at_boot_response.timestamp().as_secs());

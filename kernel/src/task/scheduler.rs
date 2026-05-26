@@ -3,16 +3,31 @@ use core::sync::atomic::{AtomicU64, Ordering};
 use alloc::{collections::btree_map::BTreeMap, vec::Vec};
 
 use crate::{
-    arch::arch::{enter_usermode, safe_lock},
-    task::context::UserContext,
-    task::process::{Process, ProcessState},
+    arch::arch::{GLOBAL_TICK_COUNT, safe_lock},
+    config::TIMER_FREQUENCY_HZ,
+    driver::timer::TIMER,
+    task::{
+        context::UserContext,
+        process::{Process, ProcessState},
+    },
     util::Locked,
 };
 
 #[cfg(target_arch = "aarch64")]
 use crate::arch::aarch64::interrupts::run_next;
 #[cfg(target_arch = "x86_64")]
-use crate::arch::x86_64::syscall::run_next;
+use crate::arch::x86_64::{
+    gdt::{user_code_selector, user_data_selector},
+    syscall::run_next,
+    usermode::enter_usermode_x86_64,
+};
+#[cfg(target_arch = "x86_64")]
+use x86_64::structures::gdt::SegmentSelector;
+
+#[cfg(target_arch = "x86_64")]
+fn with_rpl3(ss: SegmentSelector) -> u64 {
+    (ss.0 as u64) | 3
+}
 
 pub static CURRENT_PID: AtomicU64 = AtomicU64::new(0);
 
@@ -44,11 +59,24 @@ impl Scheduler {
 }
 
 impl Locked<Scheduler> {
-    pub fn spawn_process(&self, entry_point: u64, stack_top: u64, heap_base: u64) -> Option<u64> {
+    pub fn spawn_process(
+        &self,
+        entry_point: u64,
+        stack_top: u64,
+        kernel_stack_top: u64,
+        heap_base: u64,
+    ) -> Option<u64> {
         let mut guard = safe_lock(|| self.lock());
         let pid = guard.next_pid;
         guard.next_pid += 1;
-        let process = Process::new(pid, entry_point, stack_top, heap_base, heap_base);
+        let process = Process::new(
+            pid,
+            entry_point,
+            stack_top,
+            kernel_stack_top,
+            heap_base,
+            heap_base,
+        );
         guard.processes.insert(pid, process);
 
         Some(pid)
@@ -57,6 +85,15 @@ impl Locked<Scheduler> {
     pub fn next_task(&self) -> u64 {
         if let Some(previous_pid) = current_pid() {
             let mut guard = safe_lock(|| self.lock());
+
+            for process in guard.processes.values_mut() {
+                if process.info.wake_tick.is_some() {
+                    if TIMER.now().elapsed() >= process.info.wake_tick.unwrap() {
+                        process.state = ProcessState::Ready;
+                        process.info.wake_tick = None;
+                    }
+                }
+            }
 
             if let Some(process) = guard.processes.get_mut(&previous_pid) {
                 if matches!(process.state, ProcessState::Running) {
@@ -89,8 +126,9 @@ impl Locked<Scheduler> {
         };
     }
 
+    #[allow(unused_variables)]
     pub fn switch_to(&self, pid: u64, should_swapgs: bool) {
-        let (ctx_opt, entry, stack_top) = {
+        let (ctx_opt, entry, stack_top, kernel_stack_top) = {
             let mut guard = safe_lock(|| self.lock());
 
             if let Some(previous_pid) = current_pid() {
@@ -113,29 +151,45 @@ impl Locked<Scheduler> {
                 new_process.saved_ctx,
                 new_process.user_entry,
                 new_process.stack_top,
+                new_process.kernel_stack_top,
             )
         };
 
         set_current_pid(Some(pid));
 
+        #[cfg(target_arch = "x86_64")]
+        unsafe {
+            use x86_64::VirtAddr;
+
+            use crate::arch::x86_64::{gdt::TSS_MUTEX, syscall::PER_CPU};
+
+            PER_CPU.kernel_rsp = kernel_stack_top;
+            if let Some(tss) = TSS_MUTEX.lock().as_mut() {
+                tss.privilege_stack_table[0] = VirtAddr::new(kernel_stack_top);
+            }
+        }
+
+        #[cfg(target_arch = "aarch64")]
+        unsafe {
+            let saved_ctx = ctx_opt.expect("Could not get user context");
+            run_next((&saved_ctx) as *const UserContext, saved_ctx.sp_el0);
+        }
+
+        #[cfg(target_arch = "x86_64")]
         match ctx_opt {
-            #[allow(unused_variables, unused_unsafe)]
             Some(saved_ctx) => unsafe {
-                #[cfg(target_arch = "x86_64")]
-                run_next((&saved_ctx) as *const UserContext, saved_ctx.rsp);
-                #[cfg(target_arch = "aarch64")]
-                run_next((&saved_ctx) as *const UserContext, saved_ctx.sp_el0);
+                let user_cs = with_rpl3(user_code_selector());
+                let user_ss = with_rpl3(user_data_selector());
+                run_next(
+                    (&saved_ctx) as *const UserContext,
+                    saved_ctx.rsp,
+                    user_cs,
+                    user_ss,
+                );
             },
-            None => enter_usermode(
-                entry as u64,
-                (stack_top & !0xF)
-                    - cfg_select! {
-                        target_arch = "x86_64" => 8,
-                        target_arch = "aarch64" => 16,
-                        _ => 8
-                    },
-                should_swapgs,
-            ),
+            None => {
+                enter_usermode_x86_64(entry as u64, (stack_top & !0xF) - 8, should_swapgs);
+            }
         }
     }
 
@@ -150,3 +204,37 @@ impl Locked<Scheduler> {
 }
 
 pub static SCHEDULER: Locked<Scheduler> = Locked::new(Scheduler::new());
+
+#[unsafe(no_mangle)]
+pub extern "C" fn check_and_reschedule() -> isize {
+    let current_pid = CURRENT_PID.load(Ordering::Relaxed);
+    let should = safe_lock(|| {
+        let mut scheduler = SCHEDULER.lock();
+
+        if let Some(process) = scheduler.processes.get_mut(&current_pid) {
+            let elapsed = GLOBAL_TICK_COUNT.load(Ordering::Relaxed) - process.last_switch_tick;
+            if elapsed >= (TIMER_FREQUENCY_HZ / 60) as u64 {
+                process.last_switch_tick = GLOBAL_TICK_COUNT.load(Ordering::Relaxed);
+                true
+            } else {
+                false
+            }
+        } else {
+            false
+        }
+    });
+
+    if should {
+        let next_task = SCHEDULER.next_task();
+
+        if next_task == current_pid {
+            return 0;
+        }
+
+        SCHEDULER.switch_to(next_task, true);
+
+        1
+    } else {
+        0
+    }
+}

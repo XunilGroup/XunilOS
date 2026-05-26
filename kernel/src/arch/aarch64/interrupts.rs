@@ -1,15 +1,13 @@
 use core::{arch::global_asm, sync::atomic::Ordering};
 
 use crate::{
-    arch::syscall::{check_and_reschedule, syscall_dispatch},
+    arch::{arch::do_interrupt, syscall::syscall_dispatch},
     config::TIMER_FREQUENCY_HZ,
-    driver::{
-        graphics::framebuffer::with_framebuffer,
-        io::virtio::{KEYBOARD_SLOT, MOUSE_SLOT, input::input_interrupt},
-        serial::with_serial_console,
-        timer::TIMER,
+    driver::io::virtio::{KEYBOARD_SLOT, MOUSE_SLOT, input::input_interrupt},
+    task::{
+        context::{UserContext, ctx_save},
+        scheduler::check_and_reschedule,
     },
-    task::context::{UserContext, ctx_save},
 };
 
 global_asm!(
@@ -54,7 +52,7 @@ macro_rules! exception_handler {
         #[unsafe(no_mangle)]
         unsafe extern "C" fn $name() {
             core::arch::naked_asm!(
-                "sub sp, sp, #288",
+                "sub sp, sp, #304",
                 "stp x0, x1, [sp, #0]",
                 "stp x2, x3, [sp, #16]",
                 "stp x4, x5, [sp, #32]",
@@ -70,8 +68,6 @@ macro_rules! exception_handler {
                 "stp x24, x25, [sp, #192]",
                 "stp x26, x27, [sp, #208]",
                 "stp x28, x29, [sp, #224]",
-                "mrs x2, sp_el0",
-                "str x2, [sp, #280]",
                 "mrs x0, elr_el1",
                 "mrs x1, spsr_el1",
                 "stp x30, x0, [sp, #240]",
@@ -79,6 +75,10 @@ macro_rules! exception_handler {
                 "mrs x2, esr_el1",
                 "mrs x3, far_el1",
                 "stp x2, x3, [sp, #264]",
+                "mrs x2, sp_el0",
+                "str x2, [sp, #280]",
+                "add x4, sp, #304", // compute stack ptr ourself instead of accessing sp_el1
+                "str x4, [sp, #288]",
                 "mov x0, sp",
                 concat!("bl ", stringify!($rust_handler)),
                 "ldr x2, [sp, #280]",
@@ -102,7 +102,7 @@ macro_rules! exception_handler {
                 "ldp x24, x25, [sp, #192]",
                 "ldp x26, x27, [sp, #208]",
                 "ldp x28, x29, [sp, #224]",
-                "add sp, sp, #288",
+                "add sp, sp, #304",
                 "eret"
             );
         }
@@ -203,33 +203,34 @@ unsafe extern "C" fn irq_handler(ctx: *mut UserContext) {
 
     match interrupt_id {
         30 => {
-            TIMER.interrupt();
-
-            let t = TIMER.interrupt_count.load(Ordering::Relaxed);
-
-            if t % 60 == 0 {
-                with_framebuffer(|fb| {
-                    with_serial_console(|serial_console| serial_console.render(fb));
-                    fb.present();
-                });
-            }
-
             let ticks = timer_ticks_per_irq();
             unsafe { core::arch::asm!("msr cntp_tval_el0, {}", in(reg) ticks) };
             unsafe { core::arch::asm!("msr cntp_ctl_el0, {}", in(reg) 1u64) };
+
+            unsafe {
+                gic_eoi(interrupt_id);
+            }
+
+            ctx_save(ctx);
+            do_interrupt();
+            check_and_reschedule();
         }
         interrupt_id if keyboard_irq == interrupt_id as u64 => {
             input_interrupt("kbd");
+            unsafe {
+                gic_eoi(interrupt_id);
+            }
         }
         interrupt_id if mouse_irq == interrupt_id as u64 => {
             input_interrupt("mouse");
+            unsafe {
+                gic_eoi(interrupt_id);
+            }
         }
 
-        _ => {}
-    }
-
-    unsafe {
-        gic_eoi(interrupt_id);
+        _ => unsafe {
+            gic_eoi(interrupt_id);
+        },
     }
 }
 
@@ -237,8 +238,8 @@ fn handle_aborts(ec: u64, ctx: &UserContext) {
     match ec {
         ec if ec == 0x25 || ec == 0x24 => {
             panic!(
-                "Data abort at VA={:#x} ELR={:#x} ESR={:#x}",
-                ctx.far_el1, ctx.elr_el1, ctx.esr_el1
+                "Data abort at VA={:#x} ELR={:#x} ESR={:#x} FAR={:#x}",
+                ctx.far_el1, ctx.elr_el1, ctx.esr_el1, ctx.far_el1
             );
         }
         ec if ec == 0x21 || ec == 0x20 => {
@@ -276,8 +277,6 @@ unsafe extern "C" fn sync_handler_user(ctx: *mut UserContext) {
             } as u64;
 
             ctx_save(ctx as *const UserContext);
-
-            let _ = unsafe { check_and_reschedule() };
         }
         _ => handle_aborts(ec, ctx),
     };
@@ -296,10 +295,16 @@ pub unsafe fn run_next(ctx: *const UserContext, user_sp: u64) {
     core::arch::naked_asm!(
         "mov x30, x0",
         "msr sp_el0, x1",
+        "isb",
+        "ldr x2, [x30, #288]",
+        "mov sp, x2",
+        "isb",
         "ldr x2, [x30, #248]",
         "msr elr_el1, x2",
+        "isb",
         "ldr x3, [x30, #256]",
         "msr spsr_el1, x3",
+        "isb",
         "ldp x0, x1, [x30, #0]",
         "ldp x2, x3, [x30, #16]",
         "ldp x4, x5, [x30, #32]",

@@ -1,4 +1,4 @@
-use core::sync::atomic::Ordering;
+use core::{arch::naked_asm, sync::atomic::Ordering};
 
 use crate::{
     arch::{arch::serial_print, x86_64::gdt},
@@ -15,6 +15,7 @@ use lazy_static::lazy_static;
 use pic8259::ChainedPics;
 use spin::Mutex;
 use x86_64::{
+    VirtAddr,
     registers::control::Cr2,
     structures::idt::{InterruptDescriptorTable, InterruptStackFrame, PageFaultErrorCode},
 };
@@ -50,8 +51,10 @@ lazy_static! {
             idt.double_fault
                 .set_handler_fn(double_fault_handler)
                 .set_stack_index(gdt::DOUBLE_FAULT_IST_INDEX);
+            idt[InterruptIndex::Timer.as_u8()]
+                .set_handler_addr(VirtAddr::new(timer_interrupt_handler as *const u8 as u64))
+                .set_stack_index(gdt::TIMER_IST_INDEX);
         }
-        idt[InterruptIndex::Timer.as_u8()].set_handler_fn(timer_interrupt_handler);
         idt.page_fault.set_handler_fn(page_fault_handler);
         idt.general_protection_fault.set_handler_fn(gpf_handler);
         idt[InterruptIndex::Keyboard.as_u8()].set_handler_fn(keyboard_interrupt_handler);
@@ -99,17 +102,114 @@ pub extern "x86-interrupt" fn invalid_opcode_handler(stack_frame: InterruptStack
     panic!("EXCEPTION: INVALID OPCODE\n{:#?}", stack_frame);
 }
 
-extern "x86-interrupt" fn timer_interrupt_handler(_stack_frame: InterruptStackFrame) {
-    TIMER.interrupt();
+#[unsafe(naked)]
+pub fn timer_interrupt_handler() {
+    naked_asm!(
+        r#"
+        test qword ptr [rsp + 8], 3
+        jz .from_kernel
 
-    let t = TIMER.interrupt_count.load(Ordering::Relaxed);
-    if t % 60 == 0 {
-        with_framebuffer(|fb| {
-            with_serial_console(|serial_console| serial_console.render(fb));
-            fb.present();
-        });
-    }
+        swapgs
 
+        sub rsp, 144
+
+        mov [rsp + 0],   r15
+        mov [rsp + 8],   r14
+        mov [rsp + 16],  r13
+        mov [rsp + 24],  r12
+        mov [rsp + 32],  r11
+        mov [rsp + 40],  r10
+        mov [rsp + 48],  r9
+        mov [rsp + 56],  r8
+        mov [rsp + 64],  rsi
+        mov [rsp + 72],  rdi
+        mov [rsp + 80],  rbp
+        mov [rsp + 88],  rdx
+        mov [rsp + 96],  rcx
+        mov [rsp + 104], rbx
+        mov [rsp + 112], rax
+
+        mov rax, [rsp + 144 + 0]
+        mov [rsp + 128], rax
+        mov rax, [rsp + 144 + 16]
+        mov [rsp + 136], rax
+        mov rax, [rsp + 144 + 24]
+        mov [rsp + 120], rax
+
+        mov rdi, rsp
+
+        call ctx_save
+        call do_interrupt
+        call eoi
+        call check_and_reschedule
+        test rax, rax
+        jnz .switched
+
+        mov rax, [rsp + 112]
+        mov rbx, [rsp + 104]
+        mov rcx, [rsp + 96]
+        mov rdx, [rsp + 88]
+        mov rbp, [rsp + 80]
+        mov rdi, [rsp + 72]
+        mov rsi, [rsp + 64]
+        mov r8,  [rsp + 56]
+        mov r9,  [rsp + 48]
+        mov r10, [rsp + 40]
+        mov r11, [rsp + 32]
+        mov r12, [rsp + 24]
+        mov r13, [rsp + 16]
+        mov r14, [rsp + 8]
+        mov r15, [rsp + 0]
+
+        add rsp, 144
+        swapgs
+        iretq
+
+        .from_kernel:
+        push rbp
+        push r15
+        push r14
+        push r13
+        push r12
+        push r11
+        push r10
+        push r9
+        push r8
+        push rdi
+        push rsi
+        push rdx
+        push rcx
+        push rbx
+        push rax
+
+        call do_interrupt
+        call eoi
+
+        pop rax
+        pop rbx
+        pop rcx
+        pop rdx
+        pop rsi
+        pop rdi
+        pop r8
+        pop r9
+        pop r10
+        pop r11
+        pop r12
+        pop r13
+        pop r14
+        pop r15
+        pop rbp
+        iretq
+
+        .switched:
+        ud2
+        "#
+    )
+}
+
+#[unsafe(no_mangle)]
+extern "C" fn eoi() {
     unsafe {
         PICS.lock()
             .notify_end_of_interrupt(InterruptIndex::Timer.as_u8());

@@ -8,7 +8,7 @@ use x86_64::{
 };
 
 #[cfg(target_arch = "aarch64")]
-use crate::arch::aarch64::paging::{AArchPageTable, tlb_flush};
+use crate::arch::aarch64::paging::AArchPageTable;
 
 #[cfg(target_arch = "x86_64")]
 use crate::arch::arch::{FRAME_ALLOCATOR, HHDM_OFFSET};
@@ -90,11 +90,13 @@ impl AddressSpace {
             core::arch::asm!(
                 "msr ttbr0_el1, {root}",
                 "isb",
-                root = in(reg) self.ttbr0_phys
-            );
-        }
-
-        tlb_flush();
+                "dsb ishst",
+                "tlbi vmalle1is",
+                "dsb ish",
+                "isb",
+                root = in(reg) self.mapper.root_phys
+            )
+        };
     }
 }
 

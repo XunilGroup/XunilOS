@@ -1,4 +1,4 @@
-export KARCH=x86_64
+export KARCH=aarch64
 bash build_libxunil.sh
 bash build_init.sh
 bash build_doomgeneric.sh

@@ -1,14 +1,18 @@
 use crate::{
-    arch::x86_64::{
-        gdt::load_gdt_x86_64,
-        heap::init_heap,
-        interrupts::{PICS, init_idt_x86_64},
-        kmi::setup_kmi,
-        paging::{FRAME_ALLOCATOR_X86_64, initialize_paging_x86_64},
-        syscall::init_syscalls,
+    arch::{
+        arch::serial_print,
+        x86_64::{
+            gdt::load_gdt_x86_64,
+            heap::init_heap,
+            interrupts::{PICS, init_idt_x86_64},
+            kmi::setup_kmi,
+            paging::{FRAME_ALLOCATOR_X86_64, initialize_paging_x86_64},
+            syscall::init_syscalls,
+        },
     },
     config::TIMER_FREQUENCY_HZ,
-    driver::io::mouse::MOUSE,
+    driver::{io::mouse::MOUSE, ipc::init_ipc},
+    mm::shm::init_shm,
 };
 
 use x86_64::{
@@ -79,9 +83,8 @@ pub fn init_x86_64<'a>(
     }
 
     let kmi_status = setup_kmi();
-    set_pit_interval();
 
-    interrupts::enable();
+    set_pit_interval();
 
     let mut mapper = memory_management_init(hhdm_response, memory_map_response);
 
@@ -89,7 +92,12 @@ pub fn init_x86_64<'a>(
         .ok()
         .expect("Failed to initalize heap");
 
+    interrupts::enable();
+
     MOUSE.set_status(kmi_status);
+
+    init_ipc();
+    init_shm();
 
     return mapper;
 }

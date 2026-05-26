@@ -1,7 +1,10 @@
 #![allow(dead_code, unused_imports)]
+use core::sync::atomic::Ordering;
+
 #[cfg(target_arch = "x86_64")]
 use crate::arch::x86_64::paging::create_and_map_multiple_pages;
 use alloc::vec;
+use alloc::{string::String, vec::Vec};
 #[cfg(target_arch = "x86_64")]
 use x86_64::{
     PhysAddr, VirtAddr,
@@ -18,7 +21,8 @@ use crate::driver::io::ps2::process_scancodes;
 #[cfg(target_arch = "aarch64")]
 use crate::driver::io::virtio::input::process_keycodes;
 use crate::{
-    arch::arch::{FRAME_ALLOCATOR, serial_print, sleep},
+    arch::arch::{FRAME_ALLOCATOR, GLOBAL_TICK_COUNT, serial_print},
+    config::TIMER_FREQUENCY_HZ,
     driver::{
         elf::loader::run_elf,
         graphics::framebuffer::{FRAMEBUFFER, USER_FB_BASE, with_framebuffer},
@@ -26,9 +30,14 @@ use crate::{
             fs::vfs::{vfs_close, vfs_lseek, vfs_open, vfs_read},
             keyboard::KeyboardEvent,
         },
+        ipc::{Permissions, create_port, manage_port, read_port, write_port},
         timer::TIMER,
     },
-    print,
+    mm::{
+        shm::{NEXT_SHM_ID, SHM_REGISTRY, SHM_SLOT_SIZE, SharedMemory, USER_SHM_BASE},
+        usercopy::copy_cstr_to_user,
+    },
+    print, println,
     task::{
         process::ProcessState,
         scheduler::{SCHEDULER, current_pid},
@@ -64,6 +73,11 @@ const CLOCK_GETTIME: usize = 228;
 const EXIT_GROUP: usize = 231;
 const KBD_READ: usize = 666;
 const SLEEP: usize = 909090; // zzz haha
+const IPC_CREATE: usize = 500;
+const IPC_READ: usize = 501;
+const IPC_WRITE: usize = 502;
+const IPC_MANAGE: usize = 503;
+const SHM_OPEN: usize = 600;
 pub const MAP_FRAMEBUFFER: usize = 5555;
 pub const FRAMEBUFFER_SWAP: usize = 6666;
 
@@ -224,6 +238,7 @@ fn kbd_read(user_ptr: *mut KeyboardEvent, max_events: isize) -> isize {
                     to_copy * size_of::<KeyboardEvent>(),
                 ) {
                     process.kbd_buffer.drain(0..to_copy);
+
                     return to_copy as isize;
                 } else {
                     return -1;
@@ -367,22 +382,6 @@ pub fn exec(arg0: isize) -> isize {
     0
 }
 
-pub fn set_reschedule(should_reschedule: bool) {
-    let pid = current_pid().unwrap_or(0);
-
-    if pid == 0 {
-        return;
-    }
-
-    let mut scheduler = SCHEDULER.lock();
-
-    if let Some(process) = scheduler.processes.get_mut(&pid) {
-        process.should_reschedule = should_reschedule;
-    }
-
-    drop(scheduler);
-}
-
 pub fn exit() -> isize {
     serial_print("Process Exited.");
     let pid = current_pid().unwrap_or(0);
@@ -415,31 +414,246 @@ pub fn exit() -> isize {
     crate::arch::arch::infinite_idle();
 }
 
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn check_and_reschedule() -> usize {
+fn sleep(ticks: isize) -> isize {
+    let ticks = (ticks as usize) * TIMER_FREQUENCY_HZ / 1000;
+
     let pid = current_pid().unwrap_or(0);
 
     if pid == 0 {
         return 0;
     }
 
-    let should = SCHEDULER
-        .with_process(pid, |process| process.should_reschedule)
-        .unwrap_or(false);
+    SCHEDULER.with_process(pid, |process| {
+        process.info.wake_tick = Some(TIMER.now().elapsed() + ticks as u64);
+        process.state = ProcessState::Blocked;
+    });
 
-    if !should {
+    0
+}
+
+fn ipc_create(name_ptr: isize, default_permissions: isize) -> isize {
+    let pid = current_pid().unwrap_or(0);
+
+    if pid == 0 {
         return 0;
     }
 
-    let next_task = SCHEDULER.next_task();
+    let default_permissions = Permissions::from_bits_retain(default_permissions as u32);
 
-    if next_task == pid {
+    let name = match SCHEDULER.with_process(pid, |process| {
+        let address_space = process.address_space.as_mut().ok_or::<isize>(-1)?;
+        copy_cstr_from_user(&mut address_space.mapper, name_ptr as *const u8, 256)
+    }) {
+        Some(Ok(p)) => p,
+        _ => return -1,
+    };
+
+    create_port(name, pid, default_permissions);
+
+    0
+}
+
+fn ipc_read(name_ptr: isize, output_ptr: isize, from: isize) -> isize {
+    let pid = current_pid().unwrap_or(0);
+    if pid == 0 {
+        return 0;
+    }
+    let name = match SCHEDULER.with_process(pid, |process| {
+        let address_space = process.address_space.as_mut().ok_or::<isize>(-1)?;
+        copy_cstr_from_user(&mut address_space.mapper, name_ptr as *const u8, 256)
+    }) {
+        Some(Ok(p)) => p,
+        _ => return 0,
+    };
+    return match read_port(name, pid, from as i64) {
+        Some(message) => {
+            let sender = message.from as isize;
+            SCHEDULER
+                .with_process(pid, |process| {
+                    process
+                        .address_space
+                        .as_mut()
+                        .map(|address_space| {
+                            copy_cstr_to_user(
+                                &mut address_space.mapper,
+                                message.content,
+                                output_ptr as *mut u8,
+                            )
+                        })
+                        .unwrap_or(Ok(()))
+                })
+                .unwrap_or(Ok(()))
+                .map(|_| sender)
+                .unwrap_or(0)
+        }
+        None => 0,
+    };
+}
+
+fn ipc_write(name_ptr: isize, message_ptr: isize) -> isize {
+    let pid = current_pid().unwrap_or(0);
+
+    if pid == 0 {
         return 0;
     }
 
-    SCHEDULER.switch_to(next_task, true);
+    let (name, message) = match SCHEDULER.with_process(pid, |process| {
+        let address_space = process.address_space.as_mut().ok_or::<isize>(-1)?;
+        let name = copy_cstr_from_user(&mut address_space.mapper, name_ptr as *const u8, 256)?;
+        let message =
+            copy_cstr_from_user(&mut address_space.mapper, message_ptr as *const u8, 256)?;
+        Ok::<(String, String), isize>((name, message))
+    }) {
+        Some(Ok((name, message))) => (name, message),
+        _ => return -1,
+    };
 
-    1
+    return match write_port(name, pid, message) {
+        true => 0,
+        _ => -1,
+    };
+}
+
+fn ipc_manage(name_ptr: isize, pid_to_set: isize, permissions: isize) -> isize {
+    let pid = current_pid().unwrap_or(0);
+
+    if pid == 0 {
+        return 0;
+    }
+
+    let permissions = Permissions::from_bits_retain(permissions as u32);
+
+    let name = match SCHEDULER.with_process(pid, |process| {
+        let address_space = process.address_space.as_mut().ok_or::<isize>(-1)?;
+        copy_cstr_from_user(&mut address_space.mapper, name_ptr as *const u8, 256)
+    }) {
+        Some(Ok(p)) => p,
+        _ => return -1,
+    };
+
+    return match manage_port(name, pid, pid_to_set as u64, permissions) {
+        true => 0,
+        _ => -1,
+    };
+}
+
+fn shm_open(name_ptr: isize, size: isize) -> isize {
+    if size > (SHM_SLOT_SIZE as f64 * 0.8) as isize {
+        return -1;
+    }
+
+    let pid = current_pid().unwrap_or(0);
+
+    if pid == 0 {
+        return 0;
+    }
+
+    SCHEDULER
+        .with_process(pid, |process| -> Result<isize, isize> {
+            let address_space = process.address_space.as_mut().ok_or::<isize>(-1)?;
+
+            let name = copy_cstr_from_user(&mut address_space.mapper, name_ptr as *const u8, 256)?;
+
+            #[allow(dead_code, unused_mut, unused_variables)]
+            let mut map_page = |virt: u64, phys: u64| {};
+
+            #[cfg(target_arch = "x86_64")]
+            let mut map_page = |virt: u64, phys: u64| unsafe {
+                let frame = PhysFrame::<Size4KiB>::containing_address(PhysAddr::new(phys));
+
+                let page = Page::<Size4KiB>::containing_address(VirtAddr::new(virt));
+
+                let mut frame_allocator = FRAME_ALLOCATOR.lock();
+
+                address_space
+                    .mapper
+                    .map_to(
+                        page,
+                        frame,
+                        PageTableFlags::PRESENT
+                            | PageTableFlags::WRITABLE
+                            | PageTableFlags::USER_ACCESSIBLE
+                            | PageTableFlags::NO_EXECUTE,
+                        &mut *frame_allocator,
+                    )
+                    .unwrap()
+                    .flush();
+            };
+
+            #[cfg(target_arch = "aarch64")]
+            let map_page = |virt: u64, phys: u64| {
+                use crate::arch::aarch64::paging::user_data_flags;
+
+                address_space.mapper.map_page(virt, phys, user_data_flags());
+            };
+
+            let size = size as usize;
+
+            let mut shm_registry_opt = SHM_REGISTRY.lock();
+
+            let shm_registry = shm_registry_opt
+                .as_mut()
+                .expect("Could not get SHM registry");
+
+            if let Some(shared_memory) = shm_registry.get(&name) {
+                for (i, page) in shared_memory.phys_pages.iter().enumerate() {
+                    map_page(
+                        USER_SHM_BASE + shared_memory.id * SHM_SLOT_SIZE + i as u64 * 4096,
+                        *page,
+                    );
+                }
+                #[cfg(target_arch = "aarch64")]
+                crate::arch::aarch64::paging::tlb_flush();
+
+                Ok(shared_memory.id as isize)
+            } else {
+                let mut page_count = align_up(size as u64, 4096) / 4096;
+                if size as u64 % 4096 == 0 {
+                    // Map one extra page to tolerate end-boundary reads.
+                    page_count += 1;
+                }
+
+                let mut phys_pages = Vec::new();
+
+                #[cfg(target_arch = "aarch64")]
+                for _ in 0..page_count {
+                    use crate::arch::aarch64::paging::alloc_frame;
+
+                    phys_pages.push(alloc_frame().expect("Could not allocate frame"));
+                }
+
+                #[cfg(target_arch = "x86_64")]
+                for _ in 0..page_count {
+                    let mut frame_allocator = FRAME_ALLOCATOR.lock();
+
+                    phys_pages.push(
+                        frame_allocator
+                            .allocate_frame()
+                            .expect("Could not allocate frame")
+                            .start_address()
+                            .as_u64(),
+                    );
+                }
+
+                let id = NEXT_SHM_ID.fetch_add(1, Ordering::Relaxed);
+
+                shm_registry.insert(name.clone(), SharedMemory { id, phys_pages });
+
+                let shared_memory = shm_registry.get(&name.clone()).ok_or::<isize>(-1)?;
+                for (i, page) in shared_memory.phys_pages.iter().enumerate() {
+                    map_page(
+                        USER_SHM_BASE + shared_memory.id * SHM_SLOT_SIZE + i as u64 * 4096,
+                        *page,
+                    );
+                }
+                #[cfg(target_arch = "aarch64")]
+                crate::arch::aarch64::paging::tlb_flush();
+
+                Ok(shared_memory.id as isize)
+            }
+        })
+        .unwrap_or(Err(-1))
+        .unwrap_or(-1)
 }
 
 #[allow(unused_variables)]
@@ -453,27 +667,6 @@ pub unsafe extern "C" fn syscall_dispatch(
     arg4: isize,
     arg5: isize,
 ) -> isize {
-    #[cfg(target_arch = "x86_64")]
-    interrupts::enable();
-
-    set_reschedule(match num {
-        BRK => false,
-        READ => false,
-        WRITE => false,
-        OPEN => true,
-        CLOSE => true,
-        LSEEK => false,
-        EXIT => true,
-        SLEEP => true,
-        CLOCK_GETTIME => false,
-        MAP_FRAMEBUFFER => false,
-        KBD_READ => false,
-        FRAMEBUFFER_SWAP => false,
-        GETPID => false,
-        EXECVE => true,
-        _ => false,
-    });
-
     match num {
         BRK => unsafe { sbrk(arg0) },
         READ => read(arg0, arg1, arg2, arg3) as isize,
@@ -498,12 +691,9 @@ pub unsafe extern "C" fn syscall_dispatch(
         CLOSE => close(arg0),
         LSEEK => vfs_lseek(arg0 as i64, arg1 as i64, arg2 as i32) as isize,
         EXIT => exit(),
-        SLEEP => {
-            sleep(arg0 as u64);
-            0
-        }
+        SLEEP => sleep(arg0),
         EXECVE => exec(arg0),
-        CLOCK_GETTIME => TIMER.now().elapsed() as isize,
+        CLOCK_GETTIME => ((TIMER.now().elapsed() as usize) * (TIMER_FREQUENCY_HZ / 1000)) as isize,
         MAP_FRAMEBUFFER => map_framebuffer(),
         KBD_READ => kbd_read(arg0 as *mut KeyboardEvent, arg1),
         GETPID => {
@@ -514,12 +704,16 @@ pub unsafe extern "C" fn syscall_dispatch(
                 _ => return pid as isize,
             }
         }
+        IPC_CREATE => ipc_create(arg0, arg1),
+        IPC_READ => ipc_read(arg0, arg1, arg2),
+        IPC_WRITE => ipc_write(arg0, arg1),
+        IPC_MANAGE => ipc_manage(arg0, arg1, arg2),
+        SHM_OPEN => shm_open(arg0, arg1),
         FRAMEBUFFER_SWAP => {
-            with_framebuffer(|fb| {
-                fb.present();
-            });
+            with_framebuffer(|fb| fb.present());
             0
         }
+
         _ => -38, // syscall not found
     }
 }

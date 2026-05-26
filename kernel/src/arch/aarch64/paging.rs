@@ -67,6 +67,7 @@ fn phys_to_virt(phys: u64) -> *mut u64 {
 pub fn tlb_flush() {
     unsafe {
         core::arch::asm!(
+            "dsb ishst",
             "tlbi vmalle1is", // invalidate TLB
             "dsb ish",        // wait for tlb flush
             "isb",
@@ -179,7 +180,7 @@ pub fn initialize_paging_aarch64<'a>(
     let stack_phys = KERNEL_STACK.0.as_ptr() as u64 - k_virt_base + k_phys_base;
     let stack_virt = KERNEL_STACK.0.as_ptr() as u64;
 
-    page_table.map_range(stack_virt, stack_phys, 64 * 1024, kernel_data_flags());
+    page_table.map_range(stack_virt, stack_phys, 2048 * 1024, kernel_data_flags());
 
     set_page_table(page_table.root_phys);
     tlb_flush();

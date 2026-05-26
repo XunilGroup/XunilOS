@@ -1,4 +1,5 @@
 use alloc::{
+    ffi::CString,
     string::{String, ToString},
     vec::Vec,
 };
@@ -128,7 +129,7 @@ pub fn copy_cstr_from_user(
         return Err(-14);
     }
 
-    let mut buf: Vec<u8> = Vec::with_capacity(64);
+    let mut buf: Vec<u8> = Vec::with_capacity(max_len);
 
     for i in 0..max_len {
         let mut byte = 0u8;
@@ -142,4 +143,18 @@ pub fn copy_cstr_from_user(
     }
 
     Err(-36)
+}
+
+pub fn copy_cstr_to_user(
+    mapper: &mut PageTable,
+    kernel_str: String,
+    user_ptr: *mut u8,
+) -> Result<(), isize> {
+    if user_ptr.is_null() {
+        return Err(-14);
+    }
+    let c_string = CString::new(kernel_str).map_err(|_| -14isize)?;
+    let len = c_string.count_bytes();
+    let _ = copy_to_user(mapper, user_ptr, c_string.into_raw() as *const u8, len);
+    Ok(())
 }

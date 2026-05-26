@@ -1,8 +1,20 @@
 extern crate font8x8;
 
 use crate::driver::graphics::framebuffer::Framebuffer;
-use crate::driver::graphics::primitives::rectangle_filled;
 use font8x8::legacy::BASIC_LEGACY;
+
+pub fn rectangle_filled(
+    framebuffer: &mut Framebuffer,
+    x: usize,
+    y: usize,
+    width: usize,
+    height: usize,
+    color: u32,
+) {
+    for yy in y..y + height {
+        framebuffer.fill_span(x, yy, width, color);
+    }
+}
 
 pub fn render_char(
     framebuffer: &mut Framebuffer,

@@ -3,7 +3,7 @@ use core::arch::asm;
 use x86_64::instructions::tlb::flush_all;
 
 use crate::{
-    arch::x86_64::gdt::{GDT, TSS},
+    arch::x86_64::gdt::{GDT, TSS_MUTEX},
     task::context::UserContext,
 };
 
@@ -21,7 +21,7 @@ pub struct PerCpuData {
     pub kernel_rsp: u64,
 }
 
-static mut PER_CPU: PerCpuData = PerCpuData {
+pub static mut PER_CPU: PerCpuData = PerCpuData {
     user_rsp: 0,
     kernel_rsp: 0,
 };
@@ -65,8 +65,9 @@ pub fn init_syscalls() {
 
         asm!("mov gs, ax", in("ax") 0u16);
 
-        let kernel_stack_top = TSS.privilege_stack_table[0].as_u64();
-        PER_CPU.kernel_rsp = kernel_stack_top;
+        if let Some(tss) = TSS_MUTEX.lock().as_ref() {
+            PER_CPU.kernel_rsp = tss.privilege_stack_table[0].as_u64();
+        }
 
         #[allow(function_casts_as_integer)]
         wrmsr(IA32_LSTAR, syscall_entry as u64); // set syscall entry function
@@ -94,7 +95,7 @@ unsafe extern "C" fn syscall_entry() {
             mov gs:[0], rsp
             mov rsp, gs:[8]
 
-            sub rsp, 128
+            sub rsp, 144
 
             mov qword ptr [rsp + 0],   r15
             mov qword ptr [rsp + 8],   r14
@@ -115,6 +116,11 @@ unsafe extern "C" fn syscall_entry() {
             mov rax, qword ptr gs:[0]
             mov qword ptr [rsp + 120], rax
 
+            mov rax, qword ptr [rsp + 96]
+            mov qword ptr [rsp + 128], rax
+            mov rax, qword ptr [rsp + 32]
+            mov qword ptr [rsp + 136], rax
+
             mov rbx, rsp  // rbx = frame base
 
             // ctx_save(frame)
@@ -123,7 +129,6 @@ unsafe extern "C" fn syscall_entry() {
             call ctx_save
             mov rsp, rbx
 
-            // syscall_dispatch(num,arg0..arg5)
             mov rdi, qword ptr [rbx + 112]
             mov rsi, qword ptr [rbx + 72]
             mov rdx, qword ptr [rbx + 64]
@@ -131,28 +136,23 @@ unsafe extern "C" fn syscall_entry() {
             mov r8,  qword ptr [rbx + 40]
             mov r9,  qword ptr [rbx + 56]
 
-            lea rsp, [rbx - 24]              // rsp%16==8 before call
+            lea rsp, [rbx - 24]
             mov rax, qword ptr [rbx + 48]
             mov qword ptr [rsp + 0], rax
             call syscall_dispatch
             mov rsp, rbx
 
-            // save return value into frame (so normal restore uses it)
             mov qword ptr [rbx + 112], rax
 
-            // ctx_save(frame) again so saved_ctx.rax reflects return value
             mov rdi, rbx
             lea rsp, [rbx - 8]
             call ctx_save
             mov rsp, rbx
 
-            // maybe switch tasks (this should not return if it switches)
-            lea rsp, [rbx - 8]
-            call check_and_reschedule
-            mov rsp, rbx
-
-            test rax, rax
-            jnz .done
+            mov rax, qword ptr [rsp + 128]
+            mov qword ptr [rsp + 96], rax
+            mov rax, qword ptr [rsp + 136]
+            mov qword ptr [rsp + 32], rax
 
             // restore registers from frame
             mov rax, qword ptr [rsp + 112]
@@ -165,12 +165,11 @@ unsafe extern "C" fn syscall_entry() {
             mov r8,  qword ptr [rsp + 56]
             mov r9,  qword ptr [rsp + 48]
             mov r10, qword ptr [rsp + 40]
-            mov r11, qword ptr [rsp + 32]    // rflags — sysretq loads RFLAGS from r11
+            mov r11, qword ptr [rsp + 32]
             mov r12, qword ptr [rsp + 24]
             mov r13, qword ptr [rsp + 16]
             mov r14, qword ptr [rsp + 8]
             mov r15, qword ptr [rsp + 0]
-            // don't restore rsp from frame — use the user rsp we saved in gs:[0]
             mov rsp, qword ptr gs:[0]
             swapgs
             sysretq
@@ -182,27 +181,40 @@ unsafe extern "C" fn syscall_entry() {
 
 #[unsafe(naked)]
 #[unsafe(no_mangle)]
-pub unsafe fn run_next(ctx: *const UserContext, user_rsp: u64) {
+pub unsafe fn run_next(ctx: *const UserContext, user_rsp: u64, user_cs: u64, user_ss: u64) {
     core::arch::naked_asm!(
-        "mov gs:[0], rsi", // store new user rsp
-        "mov rsp, rdi",
-        "mov r15, qword ptr [rsp + 0]",
-        "mov r14, qword ptr [rsp + 8]",
-        "mov r13, qword ptr [rsp + 16]",
-        "mov r12, qword ptr [rsp + 24]",
-        "mov r11, qword ptr [rsp + 32]", // rflags
-        "mov r10, qword ptr [rsp + 40]",
-        "mov r9,  qword ptr [rsp + 48]",
-        "mov r8,  qword ptr [rsp + 56]",
-        "mov rsi, qword ptr [rsp + 64]",
-        "mov rdi, qword ptr [rsp + 72]",
-        "mov rbp, qword ptr [rsp + 80]",
-        "mov rdx, qword ptr [rsp + 88]",
-        "mov rcx, qword ptr [rsp + 96]", // rip
-        "mov rbx, qword ptr [rsp + 104]",
-        "mov rax, qword ptr [rsp + 112]",
-        "mov rsp, qword ptr [rsp + 120]", // user rsp
+        // rdi = ctx, rsi = user_rsp, rdx = user_cs, rcx = user_ss
+        "mov gs:[0], rsi",
+        "mov rax, rcx",
+        "and eax, 0xFFFC",
+        "mov ds, ax",
+        "mov es, ax",
+        // save ctx ptr on stack, then build iret frame
+        "push rdi",
+        "push rcx",
+        "push rsi",
+        "push qword ptr [rdi + 136]",
+        "push rdx",
+        "push qword ptr [rdi + 128]",
+        // load all gp regs via rdi
+        "mov r15, qword ptr [rdi + 0]",
+        "mov r14, qword ptr [rdi + 8]",
+        "mov r13, qword ptr [rdi + 16]",
+        "mov r12, qword ptr [rdi + 24]",
+        "mov r11, qword ptr [rdi + 32]",
+        "mov r10, qword ptr [rdi + 40]",
+        "mov r9,  qword ptr [rdi + 48]",
+        "mov r8,  qword ptr [rdi + 56]",
+        "mov rsi, qword ptr [rdi + 64]",
+        "mov rbp, qword ptr [rdi + 80]",
+        "mov rdx, qword ptr [rdi + 88]",
+        "mov rcx, qword ptr [rdi + 96]",
+        // ctx_ptr is at [rsp + 40]
+        "mov rax, qword ptr [rsp + 40]",
+        "mov rbx, qword ptr [rax + 104]",
+        "mov rdi, qword ptr [rax + 72]",
+        "mov rax, qword ptr [rax + 112]",
         "swapgs",
-        "sysretq",
+        "iretq",
     );
 }

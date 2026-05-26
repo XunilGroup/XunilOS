@@ -5,6 +5,7 @@ pub use crate::arch::x86_64::paging::FRAME_ALLOCATOR_X86_64 as FRAME_ALLOCATOR;
 use crate::arch::x86_64::{init::init_x86_64, usermode::enter_usermode_x86_64};
 #[cfg(target_arch = "aarch64")]
 use limine::response::ExecutableAddressResponse;
+use spin::mutex::Mutex;
 #[cfg(target_arch = "x86_64")]
 use x86_64::{
     instructions::interrupts::without_interrupts,
@@ -17,12 +18,18 @@ use aarch64_cpu::registers::{DAIF, Writeable};
 #[cfg(target_arch = "aarch64")]
 pub use crate::arch::aarch64::paging::FRAME_ALLOCATOR_AARCH64 as FRAME_ALLOCATOR;
 #[cfg(target_arch = "aarch64")]
-use crate::arch::aarch64::{
-    init::init_aarch64, paging::AArchPageTable, usermode::enter_usermode_aarch64,
-};
+use crate::arch::aarch64::{init::init_aarch64, paging::AArchPageTable};
 
-use crate::{driver::timer::TIMER, util::align_up};
-use core::{arch::asm, sync::atomic::AtomicU64};
+use crate::{
+    config::TIMER_FREQUENCY_HZ,
+    driver::timer::TIMER,
+    task::scheduler::{CURRENT_PID, SCHEDULER},
+    util::align_up,
+};
+use core::{
+    arch::asm,
+    sync::atomic::{AtomicU64, Ordering},
+};
 use limine::{
     memory_map::{Entry, EntryType},
     response::{HhdmResponse, MemoryMapResponse},
@@ -32,6 +39,14 @@ use limine::{
 const UART: *mut u8 = 0x0900_0000 as *mut u8;
 
 pub static HHDM_OFFSET: AtomicU64 = AtomicU64::new(0);
+
+#[cfg(target_arch = "aarch64")]
+type PageTable = AArchPageTable;
+
+#[cfg(target_arch = "x86_64")]
+type PageTable<'a> = OffsetPageTable<'a>;
+
+pub static mut KERNEL_MAPPER: Mutex<Option<PageTable>> = Mutex::new(None);
 
 #[derive(Clone, Copy)]
 #[allow(dead_code)]
@@ -106,14 +121,12 @@ pub fn init(mapper: &mut AArchPageTable) {
     init_aarch64(mapper);
 }
 
-#[cfg(target_arch = "x86_64")]
-pub fn enter_usermode(entry: u64, stack_ptr: u64, should_swapgs: bool) {
-    enter_usermode_x86_64(entry, stack_ptr, should_swapgs);
-}
+pub static GLOBAL_TICK_COUNT: AtomicU64 = AtomicU64::new(0);
 
-#[cfg(target_arch = "aarch64")]
-pub fn enter_usermode(entry: u64, stack_ptr: u64, should_swapgs: bool) {
-    enter_usermode_aarch64(entry, stack_ptr, should_swapgs);
+#[unsafe(no_mangle)]
+pub extern "C" fn do_interrupt() {
+    TIMER.interrupt();
+    GLOBAL_TICK_COUNT.fetch_add(1, Ordering::Relaxed);
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -123,18 +136,12 @@ pub fn safe_lock<R, F: FnOnce() -> R>(f: F) -> R {
 
 #[cfg(target_arch = "aarch64")]
 pub fn safe_lock<R, F: FnOnce() -> R>(f: F) -> R {
-    // #[cfg(target_arch = "aarch64")]
-    // {
-    //     DAIF.write(DAIF::D::Masked + DAIF::A::Masked + DAIF::I::Masked + DAIF::F::Masked);
-    // }
-
+    let old_daif: u64;
+    unsafe { core::arch::asm!("mrs {}, daif", out(reg) old_daif) };
+    core::sync::atomic::compiler_fence(core::sync::atomic::Ordering::SeqCst);
+    DAIF.write(DAIF::D::Masked + DAIF::A::Masked + DAIF::I::Masked + DAIF::F::Masked);
     let r = f();
-
-    // #[cfg(target_arch = "aarch64")]
-    // {
-    //     DAIF.write(DAIF::D::Masked + DAIF::A::Masked + DAIF::I::Unmasked + DAIF::F::Masked);
-    // }
-
+    unsafe { core::arch::asm!("msr daif, {}", in(reg) old_daif) };
     r
 }
 
@@ -172,17 +179,6 @@ pub fn idle() {
         asm!("wfi");
         #[cfg(target_arch = "loongarch64")]
         asm!("idle 0");
-    }
-}
-
-pub fn sleep(ticks: u64) {
-    let start = TIMER.now();
-    while start.ticks_since() < ticks {
-        #[cfg(target_arch = "aarch64")]
-        {
-            DAIF.write(DAIF::D::Masked + DAIF::A::Masked + DAIF::I::Unmasked + DAIF::F::Masked);
-        }
-        idle();
     }
 }
 
