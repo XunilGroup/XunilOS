@@ -3,8 +3,8 @@ use core::sync::atomic::Ordering;
 use alloc::vec::Vec;
 
 use crate::{
-    arch::arch::GLOBAL_TICK_COUNT, driver::io::keyboard::KeyboardEvent,
-    mm::address_space::AddressSpace, task::context::UserContext,
+    arch::arch::GLOBAL_TICK_COUNT, driver::io::input::InputEvent, mm::address_space::AddressSpace,
+    task::context::UserContext,
 };
 
 pub enum ProcessState {
@@ -27,7 +27,7 @@ pub struct Process {
     pub kernel_stack_top: u64,
     pub heap_base: u64,
     pub heap_end: u64,
-    pub kbd_buffer: Vec<KeyboardEvent>,
+    pub input_buffer: Vec<InputEvent>,
     pub address_space: Option<AddressSpace>,
     pub saved_ctx: Option<UserContext>,
     pub user_entry: u64,
@@ -51,7 +51,7 @@ impl Process {
             heap_base,
             heap_end,
             last_switch_tick: GLOBAL_TICK_COUNT.load(Ordering::Relaxed),
-            kbd_buffer: Vec::new(),
+            input_buffer: Vec::new(),
             address_space: None,
             saved_ctx: None,
             user_entry,

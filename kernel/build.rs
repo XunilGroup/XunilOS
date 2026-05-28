@@ -34,7 +34,8 @@ fn main() {
             pub static DOOM_WAD: &[u8] = include_bytes!(\"../../../../../assets/doom1.wad\");\n\
             pub static DOOM_ELF: &[u8] = include_bytes!(\"../../../../../assets/{karch}/doomgeneric\");\n\
             pub static HELLOWORLD_ELF: &[u8] = include_bytes!(\"../../../../../assets/{karch}/helloworld.elf\");\n\
-            pub static BADAPPLE_ELF: &[u8] = include_bytes!(\"../../../../../assets/{karch}/badapple\");"
+            pub static BADAPPLE_ELF: &[u8] = include_bytes!(\"../../../../../assets/{karch}/badapple\");\n\
+            pub static SHELL_ELF: &[u8] = include_bytes!(\"../../../../../assets/{karch}/shell\");"
         ),
     )
     .unwrap();

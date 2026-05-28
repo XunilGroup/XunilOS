@@ -4,7 +4,7 @@ use core::{
 };
 
 #[cfg(target_arch = "x86_64")]
-use crate::arch::x86_64::{interrupts, paging::create_and_map_multiple_pages};
+use crate::arch::x86_64::paging::create_and_map_multiple_pages;
 #[allow(unused_imports)]
 use crate::driver::elf::{
     header::{
@@ -19,10 +19,7 @@ use crate::arch::aarch64::paging::{
     AArchPageTable, create_and_map_multiple_pages, kernel_data_flags, user_data_flags,
 };
 use crate::{
-    arch::arch::KERNEL_MAPPER,
-    mm::address_space::AddressSpace,
-    println,
-    task::{context::UserContext, scheduler::SCHEDULER},
+    arch::arch::KERNEL_MAPPER, mm::address_space::AddressSpace, println, task::scheduler::SCHEDULER,
 };
 #[cfg(target_arch = "x86_64")]
 use x86_64::{

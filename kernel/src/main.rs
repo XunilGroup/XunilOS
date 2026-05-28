@@ -5,7 +5,7 @@
 
 extern crate alloc;
 
-use core::fmt::Write;
+use core::fmt::{self, Write};
 use core::sync::atomic::{AtomicU64, Ordering};
 
 use limine::{
@@ -20,10 +20,8 @@ use limine::{
 use crate::arch::aarch64::paging::AArchPageTable;
 #[cfg(target_arch = "x86_64")]
 use crate::arch::arch::KERNEL_MAPPER;
-#[cfg(target_arch = "aarch64")]
-use crate::driver::io::virtio::input::init_keyboard;
-#[cfg(target_arch = "aarch64")]
-use crate::util::U64Buf;
+use crate::driver::io::input::init_input;
+
 #[cfg(target_arch = "aarch64")]
 use aarch64_cpu::registers::{DAIF, Writeable};
 
@@ -33,12 +31,9 @@ use crate::driver::io::ps2::init_keyboard;
 use crate::arch::arch::{HHDM_OFFSET, infinite_idle, init, kernel_crash, serial_print};
 use crate::driver::{
     elf::loader::run_elf,
-    graphics::{
-        framebuffer::{init_framebuffer, with_framebuffer},
-        rgb,
-    },
+    framebuffer::{init_framebuffer, with_framebuffer},
     io::fs::assets::INIT_ELF,
-    serial::{ConsoleWriter, init_serial_console, with_serial_console},
+    // serial::{ConsoleWriter, init_serial_console, with_serial_console},
     timer::TIMER,
 };
 
@@ -105,18 +100,19 @@ macro_rules! println {
     };
 }
 
+pub struct SerialWriter {}
+
+impl Write for SerialWriter {
+    fn write_str(&mut self, s: &str) -> fmt::Result {
+        serial_print(s);
+        Ok(())
+    }
+}
+
 #[doc(hidden)]
 pub fn _print(args: core::fmt::Arguments) {
-    with_framebuffer(|fb| {
-        with_serial_console(|console| {
-            let mut writer = ConsoleWriter {
-                fb,
-                console,
-                should_center: false,
-            };
-            let _ = writer.write_fmt(args);
-        });
-    });
+    let mut writer = SerialWriter {};
+    let _ = writer.write_fmt(args);
 }
 
 #[unsafe(no_mangle)]
@@ -189,9 +185,8 @@ pub unsafe extern "C" fn kernel_main_aarch64(mapper: &mut AArchPageTable) -> ! {
     } else {
         panic!("no framebuffers found");
     }
-    init_serial_console();
 
-    init_keyboard();
+    init_input();
 
     if let Some(date_at_boot_response) = DATE_AT_BOOT_REQUEST.get_response() {
         TIMER.set_date_at_boot(date_at_boot_response.timestamp().as_secs());
@@ -234,9 +229,8 @@ pub unsafe fn kernel_main_x86_64() -> ! {
         }
     }
 
-    init_serial_console();
-
     init_keyboard();
+    init_input();
 
     #[allow(static_mut_refs)]
     unsafe {
@@ -294,22 +288,22 @@ fn rust_panic(_info: &core::panic::PanicInfo) -> ! {
     };
     serial_print(msg);
     serial_print("\n");
-    with_framebuffer(|mut fb| {
-        fb.clear(rgb(180, 0, 0));
+    // with_framebuffer(|mut fb| {
+    //     fb.clear(rgb(180, 0, 0));
 
-        with_serial_console(|console| {
-            console.clear();
+    //     with_serial_console(|console| {
+    //         console.clear();
 
-            let mut writer = ConsoleWriter {
-                fb: &mut fb,
-                console,
-                should_center: true,
-            };
+    //         let mut writer = ConsoleWriter {
+    //             fb: &mut fb,
+    //             console,
+    //             should_center: true,
+    //         };
 
-            let _ = writer.write_str("KERNEL PANIC\n\n");
-            let _ = writer.write_fmt(core::format_args!("{}", _info));
-        });
-    });
+    //         let _ = writer.write_str("KERNEL PANIC\n\n");
+    //         let _ = writer.write_fmt(core::format_args!("{}", _info));
+    //     });
+    // });
 
     infinite_idle();
 }

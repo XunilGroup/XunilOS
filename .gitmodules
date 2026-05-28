@@ -10,3 +10,6 @@
 [submodule "user/apps/badapple"]
 	path = user/apps/badapple
 	url = https://github.com/XunilGroup/xunil_badapple.git
+[submodule "user/apps/shell"]
+	path = user/apps/shell
+	url = https://github.com/XunilGroup/xunil_shell.git

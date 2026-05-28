@@ -1,15 +1,9 @@
-use core::{arch::naked_asm, sync::atomic::Ordering};
+use core::arch::naked_asm;
 
 use crate::{
-    arch::{arch::serial_print, x86_64::gdt},
-    driver::{
-        graphics::framebuffer::with_framebuffer,
-        io::ps2::{keyboard_interrupt, mouse_interrupt, push_scancode},
-        serial::with_serial_console,
-        timer::TIMER,
-    },
+    arch::x86_64::gdt,
+    driver::io::ps2::{keyboard_interrupt, mouse_interrupt, push_scancode},
     println,
-    util::U64Buf,
 };
 use lazy_static::lazy_static;
 use pic8259::ChainedPics;

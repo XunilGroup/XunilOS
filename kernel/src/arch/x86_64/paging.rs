@@ -8,10 +8,7 @@ use x86_64::{
     },
 };
 
-use crate::{
-    arch::arch::{HHDM_OFFSET, XunilFrameAllocator, serial_print},
-    println,
-};
+use crate::arch::arch::{HHDM_OFFSET, XunilFrameAllocator};
 
 unsafe fn active_level_4_table(mem_offset: VirtAddr) -> &'static mut PageTable {
     let (level_4_table, _) = Cr3::read();

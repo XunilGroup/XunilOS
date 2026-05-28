@@ -3,6 +3,9 @@ use core::sync::atomic::Ordering;
 
 #[cfg(target_arch = "x86_64")]
 use crate::arch::x86_64::paging::create_and_map_multiple_pages;
+use crate::driver::io::input::{InputEvent, process_input};
+#[cfg(target_arch = "x86_64")]
+use crate::driver::io::ps2::process_scancodes;
 use alloc::vec;
 use alloc::{string::String, vec::Vec};
 #[cfg(target_arch = "x86_64")]
@@ -16,20 +19,13 @@ use x86_64::{
 
 #[cfg(target_arch = "aarch64")]
 use crate::arch::aarch64::paging::AArchPageTable;
-#[cfg(target_arch = "x86_64")]
-use crate::driver::io::ps2::process_scancodes;
-#[cfg(target_arch = "aarch64")]
-use crate::driver::io::virtio::input::process_keycodes;
 use crate::{
     arch::arch::{FRAME_ALLOCATOR, GLOBAL_TICK_COUNT, serial_print},
     config::TIMER_FREQUENCY_HZ,
     driver::{
         elf::loader::run_elf,
-        graphics::framebuffer::{FRAMEBUFFER, USER_FB_BASE, with_framebuffer},
-        io::{
-            fs::vfs::{vfs_close, vfs_lseek, vfs_open, vfs_read},
-            keyboard::KeyboardEvent,
-        },
+        framebuffer::{FRAMEBUFFER, USER_FB_BASE, with_framebuffer},
+        io::fs::vfs::{vfs_close, vfs_lseek, vfs_open, vfs_read},
         ipc::{Permissions, create_port, manage_port, read_port, write_port},
         timer::TIMER,
     },
@@ -71,7 +67,7 @@ const UNLINK: usize = 87;
 const GETDENTS64: usize = 217;
 const CLOCK_GETTIME: usize = 228;
 const EXIT_GROUP: usize = 231;
-const KBD_READ: usize = 666;
+const INPUT_READ: usize = 666;
 const SLEEP: usize = 909090; // zzz haha
 const IPC_CREATE: usize = 500;
 const IPC_READ: usize = 501;
@@ -211,11 +207,11 @@ fn close(fd: isize) -> isize {
     vfs_close(fd as i64) as isize
 }
 
-fn kbd_read(user_ptr: *mut KeyboardEvent, max_events: isize) -> isize {
+fn input_read(user_ptr: *mut InputEvent, max_events: isize) -> isize {
     #[cfg(target_arch = "x86_64")]
     process_scancodes();
-    #[cfg(target_arch = "aarch64")]
-    process_keycodes();
+
+    process_input();
 
     if max_events <= 0 || user_ptr.is_null() {
         return -1;
@@ -229,15 +225,15 @@ fn kbd_read(user_ptr: *mut KeyboardEvent, max_events: isize) -> isize {
 
     return SCHEDULER
         .with_process(pid as u64, |process| {
-            let to_copy = (max_events as usize).min(process.kbd_buffer.len());
+            let to_copy = (max_events as usize).min(process.input_buffer.len());
             if let Some(address_space) = process.address_space.as_mut() {
                 if let Ok(_) = copy_to_user(
                     &mut address_space.mapper,
                     user_ptr as *mut u8,
-                    process.kbd_buffer.as_ptr() as *const u8,
-                    to_copy * size_of::<KeyboardEvent>(),
+                    process.input_buffer.as_ptr() as *const u8,
+                    to_copy * size_of::<InputEvent>(),
                 ) {
-                    process.kbd_buffer.drain(0..to_copy);
+                    process.input_buffer.drain(0..to_copy);
 
                     return to_copy as isize;
                 } else {
@@ -695,7 +691,7 @@ pub unsafe extern "C" fn syscall_dispatch(
         EXECVE => exec(arg0),
         CLOCK_GETTIME => ((TIMER.now().elapsed() as usize) * (TIMER_FREQUENCY_HZ / 1000)) as isize,
         MAP_FRAMEBUFFER => map_framebuffer(),
-        KBD_READ => kbd_read(arg0 as *mut KeyboardEvent, arg1),
+        INPUT_READ => input_read(arg0 as *mut InputEvent, arg1),
         GETPID => {
             let pid = current_pid().unwrap_or(0);
 

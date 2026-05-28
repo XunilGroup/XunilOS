@@ -1,9 +1,9 @@
+use crate::arch::arch::safe_lock;
 use limine::framebuffer::Framebuffer as LimineFramebuffer;
 use spin::Mutex;
+
 #[cfg(target_arch = "x86_64")]
 use x86_64::structures::paging::OffsetPageTable;
-
-use crate::arch::arch::safe_lock;
 
 #[repr(C)]
 pub struct UserFrameBuffer {
@@ -56,11 +56,7 @@ impl Framebuffer {
 
     #[cfg(target_arch = "x86_64")]
     pub fn setup_x86_64(&mut self, mapper: &mut OffsetPageTable) {
-        use crate::{
-            arch::arch::{FRAME_ALLOCATOR, HHDM_OFFSET, serial_print},
-            arch::x86_64::paging::initialize_paging_x86_64,
-            util::U64Buf,
-        };
+        use crate::arch::arch::FRAME_ALLOCATOR;
         use x86_64::{
             PhysAddr, VirtAddr,
             structures::paging::{
@@ -84,8 +80,6 @@ impl Framebuffer {
         for _ in 1..pixel_frames {
             fa.allocate_frame().expect("framebuffer pixel frame");
         }
-
-        let hhdm_offset = HHDM_OFFSET.load(core::sync::atomic::Ordering::Relaxed);
 
         let flags = PageTableFlags::PRESENT | PageTableFlags::WRITABLE | PageTableFlags::NO_EXECUTE;
 
@@ -165,31 +159,6 @@ impl Framebuffer {
         self.meta.buf_phys = buf_phys;
         self.meta.buf_len = buf_len;
         self.meta.struct_phys = struct_phys;
-    }
-
-    #[inline(always)]
-    pub fn put_pixel(&mut self, x: usize, y: usize, color: u32) {
-        if x >= self.width || y >= self.height {
-            return;
-        }
-        let idx = y * self.pitch + x;
-        if idx >= self.meta.buf_len {
-            return;
-        }
-        unsafe { self.user_fb.buf_virt.add(idx).write(color) };
-    }
-
-    #[inline(always)]
-    pub fn fill_span(&mut self, x: usize, y: usize, len: usize, color: u32) {
-        if y >= self.height || x >= self.width || len == 0 {
-            return;
-        }
-        let len = core::cmp::min(len, self.width - x);
-        let start = y * self.pitch + x;
-        unsafe {
-            let slice = core::slice::from_raw_parts_mut(self.user_fb.buf_virt.add(start), len);
-            slice.fill(color);
-        }
     }
 
     pub fn present(&mut self) {

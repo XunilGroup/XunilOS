@@ -57,6 +57,10 @@ static FILES: &[FakeFileEntry] = &[
         data: DOOM_ELF,
     },
     FakeFileEntry {
+        name: "shell",
+        data: SHELL_ELF,
+    },
+    FakeFileEntry {
         name: "doom1.wad",
         data: DOOM_WAD,
     },

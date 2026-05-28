@@ -1,7 +1,8 @@
-export KARCH=aarch64
-bash build_libxunil.sh
-bash build_init.sh
+export KARCH=x86_64
+bash build_rust_app.sh libxunil
+bash build_rust_app.sh init
 bash build_doomgeneric.sh
 bash build_helloworld.sh
-bash build_badapple.sh
+bash build_rust_app.sh badapple
+bash build_rust_app.sh shell
 make run

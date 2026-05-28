@@ -1,6 +1,5 @@
 use core::mem::MaybeUninit;
 
-use alloc::boxed::Box;
 use lazy_static::lazy_static;
 use spin::mutex::Mutex;
 use x86_64::VirtAddr;

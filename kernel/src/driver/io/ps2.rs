@@ -1,23 +1,14 @@
-use core::sync::atomic::{AtomicU8, AtomicU64, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use heapless::spsc::{Consumer, Producer, Queue};
-use pc_keyboard::{DecodedKey, HandleControl, KeyCode, KeyState, Keyboard, ScancodeSet2, layouts};
+use pc_keyboard::{HandleControl, KeyCode, KeyState, Keyboard, ScancodeSet2, layouts};
 
 use static_cell::StaticCell;
 
-#[cfg(target_arch = "aarch64")]
-use crate::arch::aarch64::kmi::{
-    read_keyboard_control, read_keyboard_data, read_mouse_control, read_mouse_data,
-};
 #[cfg(target_arch = "x86_64")]
 use crate::arch::x86_64::kmi::{
     read_keyboard_control, read_keyboard_data, read_mouse_control, read_mouse_data,
 };
-use crate::{
-    driver::io::{keyboard::*, mouse::MOUSE},
-    println,
-    task::scheduler::SCHEDULER,
-    util::get_bit,
-};
+use crate::{driver::io::input::*, util::get_bit};
 
 pub fn keycode_to_linux(kc: KeyCode) -> Option<u8> {
     let code = match kc {
@@ -118,7 +109,9 @@ static mut SCANCODE_PROD: Option<Producer<'static, u8>> = None;
 static mut SCANCODE_CONS: Option<Consumer<'static, u8>> = None;
 static mut KEYBOARD: Option<Keyboard<layouts::Us104Key, ScancodeSet2>> = None;
 
-static DROPPED_SCANCODES: AtomicU64 = AtomicU64::new(0);
+static MOUSE_LEFT_BUTTON: AtomicBool = AtomicBool::new(false);
+static MOUSE_RIGHT_BUTTON: AtomicBool = AtomicBool::new(false);
+static MOUSE_MIDDLE_BUTTON: AtomicBool = AtomicBool::new(false);
 
 pub fn init_keyboard() {
     let q = SCANCODE_QUEUE.init(Queue::new());
@@ -136,17 +129,11 @@ pub fn init_keyboard() {
 }
 
 pub fn push_scancode(scancode: u8) {
-    let pushed = unsafe {
-        #[allow(static_mut_refs)]
-        match SCANCODE_PROD.as_mut() {
-            Some(prod) => prod.enqueue(scancode).is_ok(),
-            _ => false,
-        }
+    #[allow(static_mut_refs)]
+    match unsafe { SCANCODE_PROD.as_mut() } {
+        Some(prod) => prod.enqueue(scancode).is_ok(),
+        _ => false,
     };
-
-    if !pushed {
-        DROPPED_SCANCODES.fetch_add(1, Ordering::Relaxed);
-    }
 }
 
 pub fn process_scancodes() {
@@ -162,42 +149,21 @@ pub fn process_scancodes() {
             }
         };
 
-        if let Some(kbd_event) = process_scancode(scancode) {
-            let mut scheduler = SCHEDULER.lock();
-            for process in scheduler.processes.values_mut() {
-                process.kbd_buffer.push(kbd_event);
+        #[allow(static_mut_refs)]
+        let kbd = unsafe { KEYBOARD.as_mut().unwrap() };
+        if let Ok(Some(key_event)) = kbd.add_byte(scancode) {
+            if let Some(linux_keycode) = keycode_to_linux(key_event.code) {
+                enqueue_input_event(InputEvent {
+                    event_type: EVENT_KEY,
+                    code: linux_keycode as u16,
+                    value: if key_event.state == KeyState::Down {
+                        1
+                    } else {
+                        0
+                    },
+                });
             }
-            drop(scheduler);
         }
-    }
-}
-
-pub fn process_scancode(scancode: u8) -> Option<KeyboardEvent> {
-    #[allow(static_mut_refs)]
-    let kbd = unsafe { KEYBOARD.as_mut().expect("keyboard not initialized") };
-    if let Ok(Some(key_event)) = kbd.add_byte(scancode) {
-        let keycode = key_event.code;
-        let keystate = key_event.state;
-        let (unicode, state) = match (kbd.process_keyevent(key_event), keystate) {
-            (Some(DecodedKey::Unicode(ch)), st) => (ch as u32, st),
-            _ => (0, keystate),
-        };
-
-        if let Some(linux_keycode) = keycode_to_linux(keycode) {
-            let effective_shift = kbd.get_modifiers().is_shifted() & kbd.get_modifiers().capslock;
-            return Some(KeyboardEvent {
-                state: if state == KeyState::Down { 1 } else { 0 },
-                _pad1: 0,
-                key: linux_keycode as u16,
-                mods: 0,
-                _pad2: 0,
-                unicode: keycode_to_char(linux_keycode, effective_shift).unwrap_or('\0') as u32,
-            });
-        } else {
-            return None;
-        }
-    } else {
-        return None;
     }
 }
 
@@ -293,33 +259,52 @@ pub fn process_mouse_interrupt() -> Option<(bool, bool, bool, i16, i16)> {
 }
 
 pub fn mouse_interrupt() {
-    if let Some(interrupt_result) = process_mouse_interrupt() {
-        MOUSE
-            .left_button_pressed
-            .store(interrupt_result.0, Ordering::Relaxed);
-        MOUSE
-            .right_button_pressed
-            .store(interrupt_result.1, Ordering::Relaxed);
-        MOUSE
-            .middle_button_pressed
-            .store(interrupt_result.2, Ordering::Relaxed);
-        MOUSE
-            .x_delta
-            .fetch_add(interrupt_result.3, Ordering::Relaxed);
-        MOUSE
-            .y_delta
-            .fetch_add(interrupt_result.4, Ordering::Relaxed);
+    if let Some((left, right, middle, dx, dy)) = process_mouse_interrupt() {
+        if left != MOUSE_LEFT_BUTTON.swap(left, Ordering::Relaxed) {
+            enqueue_input_event(InputEvent {
+                event_type: EVENT_KEY,
+                code: BTN_LEFT,
+                value: left as u32,
+            });
+        }
+
+        if right != MOUSE_RIGHT_BUTTON.swap(right, Ordering::Relaxed) {
+            enqueue_input_event(InputEvent {
+                event_type: EVENT_KEY,
+                code: BTN_RIGHT,
+                value: right as u32,
+            });
+        }
+
+        if middle != MOUSE_MIDDLE_BUTTON.swap(middle, Ordering::Relaxed) {
+            enqueue_input_event(InputEvent {
+                event_type: EVENT_KEY,
+                code: BTN_MIDDLE,
+                value: middle as u32,
+            });
+        }
+
+        if dx != 0 {
+            enqueue_input_event(InputEvent {
+                event_type: EVENT_REL,
+                code: REL_X,
+                value: dx as i32 as u32,
+            });
+        }
+
+        if dy != 0 {
+            enqueue_input_event(InputEvent {
+                event_type: EVENT_REL,
+                code: REL_Y,
+                value: dy as i32 as u32,
+            });
+        }
     }
 }
 
 pub fn keyboard_interrupt() -> Option<u8> {
-    #[cfg(target_arch = "x86_64")]
     if (unsafe { read_keyboard_control() } & 0x01) == 0 {
         return None; // OBF clear, no data
-    }
-    #[cfg(target_arch = "aarch64")]
-    if (unsafe { read_keyboard_control() } & 0x10) == 0 {
-        return None; // RXFULL clear, no data
     }
 
     let scancode = unsafe { read_keyboard_data() };

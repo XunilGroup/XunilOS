@@ -9,7 +9,6 @@ dependencies = [
  "aarch64-cpu",
  "bitflags",
  "fdt",
- "font8x8",
  "heapless",
  "lazy_static",
  "limine",
@@ -58,12 +57,6 @@ name = "fdt"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "784a4df722dc6267a04af36895398f59d21d07dce47232adf31ec0ff2fa45e67"
-
-[[package]]
-name = "font8x8"
-version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "875488b8711a968268c7cf5d139578713097ca4635a76044e8fe8eedf831d07e"
 
 [[package]]
 name = "hash32"
