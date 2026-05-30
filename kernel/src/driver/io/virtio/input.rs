@@ -112,10 +112,6 @@ pub fn input_interrupt(device_type: &str) {
 
 #[allow(static_mut_refs)]
 pub fn handle_event(event: &VirtioInputEvent) {
-    if event.event_type == 0 || event.code == 0 {
-        return;
-    }
-
     enqueue_input_event(InputEvent {
         event_type: event.event_type,
         code: event.code,

@@ -139,7 +139,7 @@ pub fn process_input() {
         };
 
         let mut scheduler = SCHEDULER.lock();
-        for process in scheduler.processes.values_mut() {
+        if let Some(process) = scheduler.processes.get_mut(&1) {
             process.input_buffer.push(input_event);
         }
         drop(scheduler);

@@ -15,7 +15,7 @@ pub enum ProcessState {
 }
 
 pub struct ProcessInfo {
-    pub exit_code: usize,
+    pub exit_code: isize,
     pub parent: usize,
     pub wake_tick: Option<u64>,
 }
@@ -33,6 +33,7 @@ pub struct Process {
     pub user_entry: u64,
     pub last_switch_tick: u64,
     pub info: ProcessInfo,
+    pub in_ready_queue: bool,
 }
 impl Process {
     pub fn new(
@@ -60,6 +61,7 @@ impl Process {
                 parent: 0,
                 wake_tick: None,
             },
+            in_ready_queue: false,
         }
     }
 }

@@ -1,4 +1,5 @@
 #![allow(dead_code, unused_imports)]
+use core::cmp::Reverse;
 use core::sync::atomic::Ordering;
 
 #[cfg(target_arch = "x86_64")]
@@ -85,7 +86,7 @@ type PageTable<'a> = OffsetPageTable<'a>;
 
 fn map_framebuffer() -> isize {
     let pid = current_pid().unwrap_or(0);
-    if pid == 0 {
+    if pid != 1 {
         return -1;
     }
 
@@ -208,18 +209,18 @@ fn close(fd: isize) -> isize {
 }
 
 fn input_read(user_ptr: *mut InputEvent, max_events: isize) -> isize {
+    let pid = current_pid().unwrap_or(0);
+
+    if pid != 1 {
+        return -1;
+    }
+
     #[cfg(target_arch = "x86_64")]
     process_scancodes();
 
     process_input();
 
     if max_events <= 0 || user_ptr.is_null() {
-        return -1;
-    }
-
-    let pid = current_pid().unwrap_or(0);
-
-    if pid == 0 {
         return -1;
     }
 
@@ -378,36 +379,18 @@ pub fn exec(arg0: isize) -> isize {
     0
 }
 
-pub fn exit() -> isize {
-    serial_print("Process Exited.");
-    let pid = current_pid().unwrap_or(0);
-    if pid == 0 {
-        return 0;
+pub fn kill(pid: isize, exit_code: isize) -> isize {
+    let pid = pid as u64;
+    println!("PID {} Exited.", pid);
+
+    SCHEDULER.terminate_process(pid, exit_code);
+
+    if pid == current_pid().unwrap_or(0) {
+        SCHEDULER.switch_next(false);
+        crate::arch::arch::infinite_idle();
+    } else {
+        0
     }
-
-    let next_pid = {
-        let mut sched = SCHEDULER.lock();
-
-        sched.processes.remove(&pid);
-
-        sched
-            .processes
-            .iter()
-            .find_map(|(other, proc)| {
-                if *other != pid && matches!(proc.state, ProcessState::Ready) {
-                    Some(*other)
-                } else {
-                    None
-                }
-            })
-            .unwrap_or(0)
-    };
-
-    if next_pid != 0 {
-        SCHEDULER.switch_to(next_pid, false);
-    }
-
-    crate::arch::arch::infinite_idle();
 }
 
 fn sleep(ticks: isize) -> isize {
@@ -419,9 +402,15 @@ fn sleep(ticks: isize) -> isize {
         return 0;
     }
 
-    SCHEDULER.with_process(pid, |process| {
-        process.info.wake_tick = Some(TIMER.now().elapsed() + ticks as u64);
-        process.state = ProcessState::Blocked;
+    safe_lock(|| {
+        let mut guard = SCHEDULER.lock();
+        if let Some(process) = guard.processes.get_mut(&pid) {
+            let wake_at = TIMER.now().elapsed() + ticks as u64;
+            process.info.wake_tick = Some(wake_at);
+            process.state = ProcessState::Blocked;
+            process.in_ready_queue = false;
+            guard.sleep_queue.push(Reverse((wake_at, pid)));
+        };
     });
 
     0
@@ -686,7 +675,7 @@ pub unsafe extern "C" fn syscall_dispatch(
         OPEN => open(arg0, arg1),
         CLOSE => close(arg0),
         LSEEK => vfs_lseek(arg0 as i64, arg1 as i64, arg2 as i32) as isize,
-        EXIT => exit(),
+        EXIT => kill(current_pid().unwrap() as isize, arg0),
         SLEEP => sleep(arg0),
         EXECVE => exec(arg0),
         CLOCK_GETTIME => ((TIMER.now().elapsed() as usize) * (TIMER_FREQUENCY_HZ / 1000)) as isize,
@@ -705,6 +694,7 @@ pub unsafe extern "C" fn syscall_dispatch(
         IPC_WRITE => ipc_write(arg0, arg1),
         IPC_MANAGE => ipc_manage(arg0, arg1, arg2),
         SHM_OPEN => shm_open(arg0, arg1),
+        KILL => kill(arg0, -9),
         FRAMEBUFFER_SWAP => {
             with_framebuffer(|fb| fb.present());
             0

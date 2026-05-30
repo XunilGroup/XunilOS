@@ -6,7 +6,8 @@ use crate::{
     driver::io::virtio::{KEYBOARD_SLOT, MOUSE_SLOT, input::input_interrupt},
     task::{
         context::{UserContext, ctx_save},
-        scheduler::check_and_reschedule,
+        process::ProcessState,
+        scheduler::{SCHEDULER, check_and_reschedule, current_pid},
     },
 };
 
@@ -38,6 +39,8 @@ global_asm!(
   .balign 0x80; ldr x16, =lower_el_aarch32_serror; br x16
   "#
 );
+
+static mut TIMER_TICKS_PER_IRQ: u64 = 0;
 
 fn timer_ticks_per_irq() -> u64 {
     let cntfrq: u64;
@@ -161,6 +164,7 @@ unsafe fn gic_eoi(id: u32) {
 }
 
 pub fn init_interrupts() {
+    unsafe { TIMER_TICKS_PER_IRQ = timer_ticks_per_irq() };
     unsafe { use_exception_vectors() };
     unsafe { gic_init() };
     enable_interrupts();
@@ -203,17 +207,15 @@ unsafe extern "C" fn irq_handler(ctx: *mut UserContext) {
 
     match interrupt_id {
         30 => {
-            let ticks = timer_ticks_per_irq();
-            unsafe { core::arch::asm!("msr cntp_tval_el0, {}", in(reg) ticks) };
+            unsafe { core::arch::asm!("msr cntp_tval_el0, {}", in(reg) TIMER_TICKS_PER_IRQ) };
             unsafe { core::arch::asm!("msr cntp_ctl_el0, {}", in(reg) 1u64) };
 
             unsafe {
                 gic_eoi(interrupt_id);
             }
 
-            ctx_save(ctx);
             do_interrupt();
-            check_and_reschedule();
+            check_and_reschedule(&ctx);
         }
         interrupt_id if keyboard_irq == interrupt_id as u64 => {
             input_interrupt("kbd");
@@ -276,7 +278,18 @@ unsafe extern "C" fn sync_handler_user(ctx: *mut UserContext) {
                 )
             } as u64;
 
-            ctx_save(ctx as *const UserContext);
+            if let Some(pid) = current_pid() {
+                let guard = SCHEDULER.lock();
+                let needs_yield = guard
+                    .processes
+                    .get(&pid)
+                    .map_or(false, |p| !matches!(p.state, ProcessState::Running));
+                drop(guard);
+                if needs_yield {
+                    ctx_save(ctx);
+                    SCHEDULER.switch_next(true);
+                }
+            }
         }
         _ => handle_aborts(ec, ctx),
     };

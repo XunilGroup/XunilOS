@@ -7,7 +7,7 @@ use crate::{
 pub static ALLOCATOR: Locked<LinkedListAllocator> = Locked::new(LinkedListAllocator::new());
 
 pub const HEAP_START: usize = 0xffffffff90000000;
-pub const HEAP_SIZE: usize = 64 * 1024 * 1024; // 64 MiB
+pub const HEAP_SIZE: usize = 512 * 1024 * 1024; // 512 MiB
 
 pub fn init_heap(mapper: &mut AArchPageTable) {
     let pages = HEAP_SIZE / 4096;

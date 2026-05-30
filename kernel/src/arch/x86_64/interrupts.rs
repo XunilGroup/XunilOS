@@ -1,9 +1,13 @@
 use core::arch::naked_asm;
 
 use crate::{
-    arch::x86_64::gdt,
+    arch::{arch::do_interrupt, x86_64::gdt},
     driver::io::ps2::{keyboard_interrupt, mouse_interrupt, push_scancode},
     println,
+    task::{
+        context::UserContext,
+        scheduler::{check_and_reschedule, current_pid},
+    },
 };
 use lazy_static::lazy_static;
 use pic8259::ChainedPics;
@@ -78,17 +82,21 @@ pub extern "x86-interrupt" fn page_fault_handler(
     error_code: PageFaultErrorCode,
 ) {
     panic!(
-        "EXCEPTION: PAGE FAULT\nAccessed Addresss: {:?}\nError Code: {:?}\n{:#?}",
+        "EXCEPTION: PAGE FAULT\nAccessed Address: {:?}\nError Code: {:?}\nCurrent PID: {}\nPER_CPU: {:#x}\n{:#?}",
         Cr2::read(),
         error_code,
+        current_pid().unwrap_or(0),
+        &raw const crate::arch::x86_64::syscall::PER_CPU as u64,
         stack_frame
     );
 }
 
 pub extern "x86-interrupt" fn gpf_handler(stack_frame: InterruptStackFrame, error_code: u64) {
     panic!(
-        "EXCEPTION: GENERAL PROTECTION FAULT\nError Code: {:?}\n{:#?}",
-        error_code, stack_frame
+        "EXCEPTION: GENERAL PROTECTION FAULT\nError Code: {:?}\nCurrent PID: {}\n{:#?}",
+        error_code,
+        current_pid().unwrap_or(0),
+        stack_frame
     );
 }
 
@@ -132,10 +140,7 @@ pub fn timer_interrupt_handler() {
 
         mov rdi, rsp
 
-        call ctx_save
-        call do_interrupt
-        call eoi
-        call check_and_reschedule
+        call x86_interrupt
         test rax, rax
         jnz .switched
 
@@ -200,6 +205,13 @@ pub fn timer_interrupt_handler() {
         ud2
         "#
     )
+}
+
+#[unsafe(no_mangle)]
+extern "C" fn x86_interrupt(ctx: *mut UserContext) -> isize {
+    do_interrupt();
+    eoi();
+    check_and_reschedule(&ctx)
 }
 
 #[unsafe(no_mangle)]

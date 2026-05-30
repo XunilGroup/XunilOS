@@ -63,7 +63,7 @@ impl Framebuffer {
                 FrameAllocator, Mapper, Page, PageTableFlags, PhysFrame, Size4KiB,
             },
         };
-        const KERNEL_FB_BASE: u64 = 0xffffffffa0000000;
+        const KERNEL_FB_BASE: u64 = 0xffffffffc0000000;
         let buf_len = self.pitch * self.height;
         let byte_len = buf_len * core::mem::size_of::<u32>();
         let pixel_frames = (byte_len + 4095) / 4096;

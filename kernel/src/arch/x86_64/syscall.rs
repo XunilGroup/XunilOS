@@ -3,8 +3,11 @@ use core::arch::asm;
 use x86_64::instructions::tlb::flush_all;
 
 use crate::{
+    arch::arch::safe_lock,
     arch::x86_64::gdt::{GDT, TSS_MUTEX},
     task::context::UserContext,
+    task::process::ProcessState,
+    task::scheduler::{SCHEDULER, current_pid},
 };
 
 const IA32_EFER: u32 = 0xC0000080;
@@ -129,6 +132,8 @@ unsafe extern "C" fn syscall_entry() {
             call ctx_save
             mov rsp, rbx
 
+            sti
+
             mov rdi, qword ptr [rbx + 112]
             mov rsi, qword ptr [rbx + 72]
             mov rdx, qword ptr [rbx + 64]
@@ -148,6 +153,9 @@ unsafe extern "C" fn syscall_entry() {
             lea rsp, [rbx - 8]
             call ctx_save
             mov rsp, rbx
+
+            mov rdi, rbx
+            call syscall_yield_check
 
             mov rax, qword ptr [rsp + 128]
             mov qword ptr [rsp + 96], rax
@@ -170,6 +178,7 @@ unsafe extern "C" fn syscall_entry() {
             mov r13, qword ptr [rsp + 16]
             mov r14, qword ptr [rsp + 8]
             mov r15, qword ptr [rsp + 0]
+            cli
             mov rsp, qword ptr gs:[0]
             swapgs
             sysretq
@@ -177,6 +186,22 @@ unsafe extern "C" fn syscall_entry() {
             ud2
         "#,
     );
+}
+
+#[unsafe(no_mangle)]
+unsafe extern "C" fn syscall_yield_check(_ctx: *mut UserContext) {
+    if let Some(pid) = current_pid() {
+        let needs_yield = {
+            let guard = safe_lock(|| SCHEDULER.lock());
+            guard
+                .processes
+                .get(&pid)
+                .map_or(false, |p| !matches!(p.state, ProcessState::Running))
+        };
+        if needs_yield {
+            SCHEDULER.switch_next(true);
+        }
+    }
 }
 
 #[unsafe(naked)]

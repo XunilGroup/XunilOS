@@ -155,6 +155,7 @@ unsafe extern "C" fn kmain() -> ! {
                     kernel_main_x86_64()
                 }
 
+                #[cfg(target_arch = "aarch64")]
                 loop {}
             } else {
                 kernel_crash()

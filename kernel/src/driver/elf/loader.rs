@@ -176,6 +176,8 @@ pub fn run_elf(file_bytes: &[u8], should_swapgs: bool, switch_to: bool) {
 
         #[cfg(target_arch = "aarch64")]
         SCHEDULER.with_process(process_pid, |process| {
+            use crate::task::context::UserContext;
+
             process.saved_ctx = Some(UserContext {
                 x0: 0,
                 x1: 0,
