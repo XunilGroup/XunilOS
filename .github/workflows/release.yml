@@ -22,9 +22,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             build-essential \
-            gcc-x86_64-linux-gnu \
+            gcc \
+            binutils \
             gcc-aarch64-linux-gnu \
-            binutils-x86_64-linux-gnu \
             binutils-aarch64-linux-gnu \
             libc6-dev-amd64-cross \
             libc6-dev-arm64-cross \
