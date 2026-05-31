@@ -4,6 +4,17 @@ The repo is based on the limine-rust-template.
 
 It supports aarch64 inside QEMU, and x86_64 even on bare machines!
 
+## IMPORTANT
+For some reason, it doesn't work with default QEMU or VirtualBox settings.
+So, you have to:
+```
+qemu-system-x86_64 -M q35 -serial stdio -cdrom XunilOS-x86_64.iso -m 4G
+```
+Or:
+```
+qemu-system-aarch64 -M virt,gic-version=2,secure=off -cpu cortex-a72 -device ramfb -device qemu-xhci -device usb-kbd -device usb-mouse -device virtio-keyboard-device -device virtio-mouse-device -serial stdio -cdrom XunilOS-aarch64.iso -semihosting-config enable=on,target=native -m 4G -global virtio-mmio.force-legacy=false
+```
+
 # Features
 
 ## Kernel
