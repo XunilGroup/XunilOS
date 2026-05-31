@@ -25,7 +25,8 @@ jobs:
             gcc-aarch64-linux-gnu \
             binutils-aarch64-linux-gnu \
             xorriso \
-            curl
+            curl \
+            ccache
       - name: Install Rust nightly toolchain
         uses: dtolnay/rust-toolchain@nightly
         with:
