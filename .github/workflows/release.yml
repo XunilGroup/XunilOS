@@ -25,12 +25,7 @@ jobs:
             gcc \
             gcc-aarch64-linux-gnu \
             binutils-aarch64-linux-gnu \
-            nasm \
             xorriso \
-            grub-pc-bin \
-            grub-efi-amd64-bin \
-            grub-efi-arm64-bin \
-            mtools \
             curl
 
       - name: Install Rust toolchain
