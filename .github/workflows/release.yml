@@ -29,7 +29,8 @@ jobs:
             gcc \
             gcc-multilib \
             xorriso \
-            curl
+            curl \
+            ccache
 
       - name: Install build dependencies (aarch64)
         if: matrix.karch == 'aarch64'
@@ -41,7 +42,8 @@ jobs:
             binutils-aarch64-linux-gnu \
             libc6-dev-arm64-cross \
             xorriso \
-            curl
+            curl \
+            ccache
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@nightly
