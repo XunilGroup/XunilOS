@@ -1,10 +1,8 @@
 name: Build & Release XunilOS
-
 on:
   push:
     branches:
       - main
-
 jobs:
   build:
     name: Build (${{ matrix.karch }})
@@ -12,7 +10,6 @@ jobs:
     strategy:
       matrix:
         karch: [x86_64, aarch64]
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -20,27 +17,17 @@ jobs:
           submodules: recursive
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Install build dependencies (x86_64)
-        if: matrix.karch == 'x86_64'
+      - name: Install build dependencies
         run: |
+          sudo dpkg --add-architecture arm64
           sudo apt-get update
           sudo apt-get install -y \
             build-essential \
-            gcc \
-            gcc-multilib \
-            xorriso \
-            curl \
-            ccache \
-            mold
-
-      - name: Install build dependencies (aarch64)
-        if: matrix.karch == 'aarch64'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential \
+            gcc-x86_64-linux-gnu \
             gcc-aarch64-linux-gnu \
+            binutils-x86_64-linux-gnu \
             binutils-aarch64-linux-gnu \
+            libc6-dev-amd64-cross \
             libc6-dev-arm64-cross \
             xorriso \
             curl \
@@ -73,13 +60,13 @@ jobs:
     needs: build
     permissions:
       contents: write
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           submodules: recursive
           token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Download x86_64 ISO
         uses: actions/download-artifact@v4
         with:
