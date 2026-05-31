@@ -1,214 +1,233 @@
+use alloc::{
+    collections::btree_map::BTreeMap,
+    string::{String, ToString},
+    vec::Vec,
+};
+use lazy_static::lazy_static;
+
 use crate::driver::io::fs::assets::*;
-use core::ptr::{null, null_mut};
+
+lazy_static! {
+    static ref FILE_CONTENT: BTreeMap<&'static str, &'static [u8]> = {
+        let mut map = BTreeMap::new();
+        map.insert("testfile", &b"Hello, World!"[..]);
+        map.insert("helloworld.elf", HELLOWORLD_ELF);
+        map.insert("badapple", BADAPPLE_ELF);
+        map.insert("doomgeneric", DOOM_ELF);
+        map.insert("shell", SHELL_ELF);
+        map.insert("doom1.wad", DOOM_WAD);
+        map.insert("doom.cfg", &b""[..]);
+        map.insert("default.cfg", &b""[..]);
+        map
+    };
+}
 
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Debug)]
 pub struct FILE {
-    pub data: *const u8,    // pointer to the file's data
-    pub size: usize,        // total size
-    pub cursor: usize,      // current position
-    pub writable: bool,     // is this a write buffer?
-    pub write_buf: *mut u8, // for writable fake files
-    pub write_cap: usize,
+    pub name: String,
+    pub size: usize,
+    pub data: Vec<u8>,
+    pub cursor: usize,
+    pub writable: bool,
     pub fd: i64,
 }
 
 impl FILE {
-    pub const fn zeroed() -> FILE {
+    pub fn new(name: String, data: Vec<u8>, writable: bool) -> FILE {
         FILE {
-            data: null(),
-            size: 0,
+            name,
+            data: data.clone(),
             cursor: 0,
-            writable: false,
-            write_buf: null_mut(),
-            write_cap: 0,
+            writable,
             fd: -1,
+            size: data.len(),
         }
     }
 }
 
-struct FakeFileEntry {
-    name: &'static str,
-    data: &'static [u8],
+pub struct VFS {
+    files: Vec<FILE>,
+    next_fd: i64,
 }
 
-pub type Fd = i64;
-const MAX_FD: usize = 16;
-
-fn fd_ok(fd: Fd) -> bool {
-    fd >= 0 && (fd as usize) < MAX_FD
-}
-
-static FILES: &[FakeFileEntry] = &[
-    FakeFileEntry {
-        name: "testfile",
-        data: b"Hello, World!",
-    },
-    FakeFileEntry {
-        name: "helloworld.elf",
-        data: HELLOWORLD_ELF,
-    },
-    FakeFileEntry {
-        name: "badapple",
-        data: BADAPPLE_ELF,
-    },
-    FakeFileEntry {
-        name: "doomgeneric",
-        data: DOOM_ELF,
-    },
-    FakeFileEntry {
-        name: "shell",
-        data: SHELL_ELF,
-    },
-    FakeFileEntry {
-        name: "doom1.wad",
-        data: DOOM_WAD,
-    },
-    FakeFileEntry {
-        name: "default.cfg",
-        data: b"",
-    },
-    FakeFileEntry {
-        name: "doom.cfg",
-        data: b"",
-    },
-];
-
-static mut FILE_POOL: [FILE; 16] = [FILE::zeroed(); 16];
-static mut FILE_POOL_USED: [bool; 16] = [false; 16];
-
-pub unsafe fn get_file_pool_slot() -> (*mut FILE, i64) {
-    unsafe {
-        for i in 0..16 {
-            if !FILE_POOL_USED[i] {
-                FILE_POOL_USED[i] = true;
-                return (&mut FILE_POOL[i], i as i64);
-            }
-        }
-
-        (null_mut(), -1)
-    }
-}
-
-unsafe fn file_mut(fd: Fd) -> Option<&'static mut FILE> {
-    if !fd_ok(fd) {
-        return None;
-    }
-    let idx = fd as usize;
-
-    if unsafe { !FILE_POOL_USED[idx] } {
-        return None;
-    }
-
-    return unsafe { Some(&mut FILE_POOL[idx]) };
-}
-
-#[unsafe(no_mangle)]
-pub fn vfs_open(name: &str, _mode: &str) -> Fd {
-    for entry in FILES {
-        if entry.name.contains(name) {
-            let (slot, fd) = unsafe { get_file_pool_slot() };
-            if slot.is_null() {
-                return -1;
-            }
-
-            unsafe {
-                (*slot).data = entry.data.as_ptr();
-                (*slot).size = entry.data.len();
-                (*slot).cursor = 0;
-                (*slot).writable = false;
-                (*slot).write_buf = null_mut();
-                (*slot).write_cap = 0;
-                (*slot).fd = fd;
-            }
-            return fd;
+impl VFS {
+    pub fn new() -> VFS {
+        VFS {
+            files: Vec::new(),
+            next_fd: 0,
         }
     }
-    -1
-}
 
-#[unsafe(no_mangle)]
-pub fn vfs_close(fd: Fd) -> i32 {
-    if !fd_ok(fd) {
-        return -1;
+    pub fn open(&mut self, name: &str, mode: &str) -> i64 {
+        let is_write = mode.contains("w") || mode.contains("a");
+
+        if let Some(file) = self
+            .files
+            .iter_mut()
+            .find(|file| file.name.as_str() == name)
+        {
+            file.cursor = 0;
+            file.writable = is_write;
+
+            return file.fd;
+        }
+
+        let fd = self.next_fd;
+        self.next_fd += 1;
+
+        let empty_data = &"".as_bytes();
+
+        let data = FILE_CONTENT.get(name).unwrap_or(empty_data);
+
+        let file = FILE {
+            name: name.to_string(),
+            data: data.to_vec(),
+            cursor: 0,
+            writable: is_write,
+            fd,
+            size: data.len(),
+        };
+
+        self.files.push(file);
+
+        fd
     }
 
-    unsafe {
-        let idx = fd as usize;
-        if !FILE_POOL_USED[idx] {
+    pub fn close(&mut self, fd: i64) -> i32 {
+        if let Some(file_pos) = self.files.iter().position(|file| file.fd == fd) {
+            self.files.remove(file_pos);
+            0
+        } else {
+            -1
+        }
+    }
+
+    pub fn lseek(&mut self, fd: i64, offset: i64, whence: i32) -> i64 {
+        let f = match self.files.iter_mut().find(|file| file.fd == fd) {
+            Some(f) => f,
+            None => return -1,
+        };
+
+        let new_pos = match whence {
+            0 => {
+                if offset < 0 {
+                    return -1;
+                }
+                offset as usize
+            }
+            1 => {
+                let cur = f.cursor as i64;
+                let pos = cur.saturating_add(offset);
+                if pos < 0 {
+                    return -1;
+                }
+                pos as usize
+            }
+            2 => {
+                let end = f.size as i64;
+                let pos = end.saturating_add(offset);
+                if pos < 0 {
+                    return -1;
+                }
+                pos as usize
+            }
+            _ => return -1,
+        };
+
+        if new_pos > f.size {
             return -1;
         }
-        FILE_POOL_USED[idx] = false;
-        FILE_POOL[idx] = FILE::zeroed();
+
+        f.cursor = new_pos;
+        f.cursor as i64
     }
 
-    0
-}
+    pub fn read(&mut self, fd: i64, len: usize) -> Option<(*const u8, usize)> {
+        if let Some(f) = self.files.iter_mut().find(|file| file.fd == fd) {
+            if f.cursor > f.size {
+                return Some((f.data.as_ptr(), 0));
+            }
 
-#[unsafe(no_mangle)]
-#[allow(unused_variables)]
-pub fn vfs_write(ptr: *mut u8, size: usize, count: usize, fp: *mut FILE) -> usize {
-    if ptr.is_null() || fp.is_null() || unsafe { (*fp).fd < 0 || (*fp).fd >= 16 } {
-        return 0;
+            let available = f.size - f.cursor;
+            let to_read = len.min(available);
+
+            let src = unsafe { f.data.as_ptr().add(f.cursor) };
+            f.cursor = f.cursor.saturating_add(to_read);
+
+            Some((src, to_read))
+        } else {
+            None
+        }
     }
-    count
+
+    pub fn write(&mut self, fd: i64, data: &[u8]) -> Option<usize> {
+        let file = self.files.iter_mut().find(|f| f.fd == fd)?;
+
+        if !file.writable {
+            return None;
+        }
+
+        file.data.extend_from_slice(data);
+        file.size = file.data.len();
+        Some(data.len())
+    }
 }
 
-#[unsafe(no_mangle)]
-pub fn vfs_read(fd: Fd, len: usize) -> Option<(*const u8, usize)> {
+pub static mut VFS_INSTANCE: Option<VFS> = None;
+
+pub fn init_vfs() {
     unsafe {
-        let f = file_mut(fd)?;
-        if f.cursor > f.size {
-            return Some((f.data, 0));
-        }
-
-        let available = f.size - f.cursor;
-        let to_read = len.min(available);
-
-        let src = f.data.add(f.cursor);
-        f.cursor = f.cursor.saturating_add(to_read);
-
-        Some((src, to_read))
+        VFS_INSTANCE = Some(VFS {
+            files: Vec::new(),
+            next_fd: 3,
+        })
     }
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn vfs_lseek(fd: Fd, offset: i64, whence: i32) -> i64 {
-    let f = match unsafe { file_mut(fd) } {
-        Some(f) => f,
-        None => return -1,
-    };
+pub fn vfs_open(name: &str, mode: &str) -> i64 {
+    #[allow(static_mut_refs)]
+    unsafe {
+        VFS_INSTANCE.as_mut().unwrap().open(name, mode)
+    }
+}
 
-    let new_pos = match whence {
-        0 => {
-            if offset < 0 {
-                return -1;
-            }
-            offset as usize
-        }
-        1 => {
-            let cur = f.cursor as i64;
-            let pos = cur.saturating_add(offset);
-            if pos < 0 {
-                return -1;
-            }
-            pos as usize
-        }
-        2 => {
-            let end = f.size as i64;
-            let pos = end.saturating_add(offset);
-            if pos < 0 {
-                return -1;
-            }
-            pos as usize
-        }
-        _ => return -1,
-    };
+#[unsafe(no_mangle)]
+pub fn vfs_close(fd: i64) -> i32 {
+    #[allow(static_mut_refs)]
+    unsafe {
+        VFS_INSTANCE.as_mut().unwrap().close(fd)
+    }
+}
 
-    if new_pos > f.size {
-        return -1;
+#[unsafe(no_mangle)]
+pub fn vfs_write(ptr: *const u8, size: usize, count: usize, fd: i64) -> Option<usize> {
+    if ptr.is_null() {
+        return None;
     }
 
-    f.cursor = new_pos;
-    f.cursor as i64
+    let len = size.checked_mul(count)?;
+
+    unsafe {
+        let slice = core::slice::from_raw_parts(ptr, len);
+        #[allow(static_mut_refs)]
+        VFS_INSTANCE.as_mut().unwrap().write(fd, slice)
+    }
+}
+
+#[unsafe(no_mangle)]
+pub fn vfs_read(fd: i64, len: usize) -> Option<(*const u8, usize)> {
+    #[allow(static_mut_refs)]
+    unsafe {
+        VFS_INSTANCE.as_mut().unwrap().read(fd, len)
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn vfs_lseek(fd: i64, offset: i64, whence: i32) -> i64 {
+    #[allow(static_mut_refs)]
+    unsafe {
+        VFS_INSTANCE.as_mut().unwrap().lseek(fd, offset, whence)
+    }
 }

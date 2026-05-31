@@ -4,9 +4,11 @@ use core::sync::atomic::Ordering;
 
 #[cfg(target_arch = "x86_64")]
 use crate::arch::x86_64::paging::create_and_map_multiple_pages;
+use crate::driver::io::fs::vfs::vfs_write;
 use crate::driver::io::input::{InputEvent, process_input};
 #[cfg(target_arch = "x86_64")]
 use crate::driver::io::ps2::process_scancodes;
+use crate::mm::usercopy::copy_from_user;
 use alloc::vec;
 use alloc::{string::String, vec::Vec};
 #[cfg(target_arch = "x86_64")]
@@ -199,6 +201,39 @@ fn open(path: isize, mode: isize) -> isize {
             let mode = copy_cstr_from_user(&mut address_space.mapper, mode as *const u8, 16)?;
 
             Ok::<isize, isize>(vfs_open(&path, &mode) as isize)
+        })
+        .unwrap_or(Err(-1))
+        .unwrap_or(-1)
+}
+
+fn write_fd(ptr: isize, size: isize, count: isize, fd: isize) -> isize {
+    let pid = current_pid().unwrap_or(0);
+    if pid == 0 {
+        return -1;
+    }
+
+    SCHEDULER
+        .with_process(pid, |process| {
+            let len = (size as usize).checked_mul(count as usize).ok_or(-1isize)?;
+            if len == 0 {
+                return Ok(0isize);
+            }
+
+            let address_space = process.address_space.as_mut().ok_or(-1isize)?;
+
+            let mut buf: alloc::vec::Vec<u8> = alloc::vec![0u8; len];
+            copy_from_user(
+                &mut address_space.mapper,
+                buf.as_mut_ptr(),
+                ptr as *const u8,
+                len,
+            )
+            .map_err(|_| -14isize)?;
+
+            Ok(
+                vfs_write(buf.as_ptr(), size as usize, count as usize, fd as i64).unwrap_or(0)
+                    as isize,
+            )
         })
         .unwrap_or(Err(-1))
         .unwrap_or(-1)
@@ -656,18 +691,22 @@ pub unsafe extern "C" fn syscall_dispatch(
         BRK => unsafe { sbrk(arg0) },
         READ => read(arg0, arg1, arg2, arg3) as isize,
         WRITE => {
-            let buf_ptr = arg1 as *const u8;
-            let len = arg2 as usize;
-            let bytes: &[u8] = unsafe { core::slice::from_raw_parts(buf_ptr, len) };
-            if let Ok(s) = core::str::from_utf8(bytes) {
-                print!("{}", s);
-            } else {
-                for byte in bytes {
-                    if *byte == b'\0' {
-                        continue;
+            if arg0 == 1 {
+                let buf_ptr = arg1 as *const u8;
+                let len = arg2 as usize;
+                let bytes: &[u8] = unsafe { core::slice::from_raw_parts(buf_ptr, len) };
+                if let Ok(s) = core::str::from_utf8(bytes) {
+                    print!("{}", s);
+                } else {
+                    for byte in bytes {
+                        if *byte == b'\0' {
+                            continue;
+                        }
+                        print!("{}", *byte as char);
                     }
-                    print!("{}", *byte as char);
                 }
+            } else {
+                write_fd(arg0, arg1, arg2, arg3);
             }
 
             0
@@ -678,7 +717,9 @@ pub unsafe extern "C" fn syscall_dispatch(
         EXIT => kill(current_pid().unwrap() as isize, arg0),
         SLEEP => sleep(arg0),
         EXECVE => exec(arg0),
-        CLOCK_GETTIME => ((TIMER.now().elapsed() as usize) * (TIMER_FREQUENCY_HZ / 1000)) as isize,
+        CLOCK_GETTIME => {
+            (TIMER.now().elapsed() + TIMER.get_date_at_boot() * TIMER_FREQUENCY_HZ as u64) as isize
+        }
         MAP_FRAMEBUFFER => map_framebuffer(),
         INPUT_READ => input_read(arg0 as *mut InputEvent, arg1),
         GETPID => {

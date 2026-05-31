@@ -1,0 +1,86 @@
+name: Build & Release XunilOS
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    name: Build (${{ matrix.karch }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        karch: [x86_64, aarch64]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            gcc \
+            gcc-aarch64-linux-gnu \
+            binutils-aarch64-linux-gnu \
+            nasm \
+            xorriso \
+            grub-pc-bin \
+            grub-efi-amd64-bin \
+            grub-efi-arm64-bin \
+            mtools \
+            curl
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: |
+            x86_64-unknown-none
+            aarch64-unknown-none
+
+      - name: Run build script
+        run: bash build_all.sh
+        env:
+          KARCH: ${{ matrix.karch }}
+
+      - name: Upload ISO artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: XunilOS-${{ matrix.karch }}.iso
+          path: XunilOS-${{ matrix.karch }}.iso
+          if-no-files-found: error
+
+  release:
+    name: Publish Release
+    runs-on: ubuntu-latest
+    needs: build
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download x86_64 ISO
+        uses: actions/download-artifact@v4
+        with:
+          name: XunilOS-x86_64.iso
+
+      - name: Download aarch64 ISO
+        uses: actions/download-artifact@v4
+        with:
+          name: XunilOS-aarch64.iso
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: commit-${{ github.sha }}
+          name: Commit ${{ github.sha }}
+          body: |
+            Automated release for commit [${{ github.sha }}](${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }})
+          files: |
+            XunilOS-x86_64.iso
+            XunilOS-aarch64.iso
+          fail_on_unmatched_files: true

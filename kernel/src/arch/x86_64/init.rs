@@ -8,7 +8,7 @@ use crate::{
         syscall::init_syscalls,
     },
     config::TIMER_FREQUENCY_HZ,
-    driver::ipc::init_ipc,
+    driver::{io::fs::vfs::init_vfs, ipc::init_ipc},
     mm::shm::init_shm,
 };
 
@@ -93,6 +93,7 @@ pub fn init_x86_64<'a>(
 
     init_ipc();
     init_shm();
+    init_vfs();
 
     return mapper;
 }

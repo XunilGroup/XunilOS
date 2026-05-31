@@ -7,7 +7,10 @@ use crate::{
         },
         arch::KERNEL_MAPPER,
     },
-    driver::{io::virtio::scan_virtio_devices, ipc::init_ipc},
+    driver::{
+        io::{fs::vfs::init_vfs, virtio::scan_virtio_devices},
+        ipc::init_ipc,
+    },
     mm::shm::init_shm,
 };
 use limine::response::{ExecutableAddressResponse, HhdmResponse, MemoryMapResponse};
@@ -40,6 +43,7 @@ pub extern "C" fn init_aarch64(mapper: &mut AArchPageTable) {
     init_interrupts();
     init_ipc();
     init_shm();
+    init_vfs();
 }
 
 pub fn preinit_aarch64<'a>(
