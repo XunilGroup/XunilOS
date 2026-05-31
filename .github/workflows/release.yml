@@ -1,8 +1,10 @@
 name: Build & Release XunilOS
+
 on:
   push:
     branches:
       - main
+
 jobs:
   build:
     name: Build (${{ matrix.karch }})
@@ -10,47 +12,66 @@ jobs:
     strategy:
       matrix:
         karch: [x86_64, aarch64]
+
     steps:
-      - name: Checkout repository with submodules
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
           submodules: recursive
           token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Install build dependencies
+
+      - name: Install build dependencies (x86_64)
+        if: matrix.karch == 'x86_64'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             build-essential \
             gcc \
+            gcc-multilib \
+            xorriso \
+            curl
+
+      - name: Install build dependencies (aarch64)
+        if: matrix.karch == 'aarch64'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
             gcc-aarch64-linux-gnu \
             binutils-aarch64-linux-gnu \
+            libc6-dev-arm64-cross \
             xorriso \
-            curl \
-            ccache
-      - name: Install Rust nightly toolchain
+            curl
+
+      - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@nightly
         with:
-          targets: |
-            x86_64-unknown-none
-            aarch64-unknown-none
+          targets: ${{ matrix.karch }}-unknown-none
+
+      - name: Create assets directory
+        run: mkdir -p assets/${{ matrix.karch }}
+
       - name: Run build script
         run: bash build_all.sh
         env:
           KARCH: ${{ matrix.karch }}
+
       - name: Upload ISO artifact
         uses: actions/upload-artifact@v4
         with:
           name: XunilOS-${{ matrix.karch }}.iso
           path: XunilOS-${{ matrix.karch }}.iso
           if-no-files-found: error
+
   release:
     name: Publish Release
     runs-on: ubuntu-latest
     needs: build
     permissions:
       contents: write
+
     steps:
-      - name: Checkout repository with submodules
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
           submodules: recursive
@@ -59,12 +80,12 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: XunilOS-x86_64.iso
-          path: ./artifacts
+
       - name: Download aarch64 ISO
         uses: actions/download-artifact@v4
         with:
           name: XunilOS-aarch64.iso
-          path: ./artifacts
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -73,6 +94,6 @@ jobs:
           body: |
             Automated release for commit [${{ github.sha }}](${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }})
           files: |
-            artifacts/XunilOS-x86_64.iso
-            artifacts/XunilOS-aarch64.iso
+            XunilOS-x86_64.iso
+            XunilOS-aarch64.iso
           fail_on_unmatched_files: true
