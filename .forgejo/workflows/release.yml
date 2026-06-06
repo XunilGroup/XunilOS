@@ -1,18 +1,25 @@
 name: Build & Release XunilOS
+
 on:
   push:
     branches:
       - main
+
 jobs:
   build:
     name: Build (${{ matrix.karch }})
     runs-on: ubuntu-latest
+
     strategy:
+      fail-fast: false
       matrix:
-        karch: [x86_64, aarch64]
+        karch:
+          - x86_64
+          - aarch64
+
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: https://data.forgejo.org/actions/checkout@v4
         with:
           submodules: recursive
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -42,12 +49,12 @@ jobs:
         run: mkdir -p assets/${{ matrix.karch }}
 
       - name: Run build script
-        run: bash build_all.sh
         env:
           KARCH: ${{ matrix.karch }}
+        run: bash build_all.sh
 
       - name: Upload ISO artifact
-        uses: actions/upload-artifact@v4
+        uses: https://data.forgejo.org/actions/upload-artifact@v4
         with:
           name: XunilOS-${{ matrix.karch }}.iso
           path: XunilOS-${{ matrix.karch }}.iso
@@ -57,32 +64,28 @@ jobs:
     name: Publish Release
     runs-on: ubuntu-latest
     needs: build
+
     permissions:
       contents: write
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-          token: ${{ secrets.GITHUB_TOKEN }}
 
+    steps:
       - name: Download x86_64 ISO
-        uses: actions/download-artifact@v4
+        uses: https://data.forgejo.org/actions/download-artifact@v4
         with:
           name: XunilOS-x86_64.iso
 
       - name: Download aarch64 ISO
-        uses: actions/download-artifact@v4
+        uses: https://data.forgejo.org/actions/download-artifact@v4
         with:
           name: XunilOS-aarch64.iso
 
-      - name: Create GitHub Release
+      - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: commit-${{ github.sha }}
           name: Commit ${{ github.sha }}
           body: |
-            Automated release for commit [${{ github.sha }}](${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }})
+            Automated release for commit ${{ github.sha }}
           files: |
             XunilOS-x86_64.iso
             XunilOS-aarch64.iso
