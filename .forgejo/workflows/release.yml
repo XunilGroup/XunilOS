@@ -41,7 +41,7 @@ jobs:
             mold
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@nightly
+        uses: https://github.com/dtolnay/rust-toolchain@nightly
         with:
           targets: ${{ matrix.karch }}-unknown-none
 
