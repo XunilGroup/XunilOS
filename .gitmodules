@@ -1,15 +1,15 @@
 [submodule "user/apps/doomgeneric"]
 	path = user/apps/doomgeneric
-	url = git@github.com:xunilGroup/doomgeneric-xunil.git
+	url = https://git.csd4ni3l.hu/XunilGroup/doomgeneric-xunil.git
 [submodule "user/libxunil"]
 	path = user/libxunil
-	url = https://github.com/XunilGroup/libxunil.git
+	url = https://git.csd4ni3l.hu/XunilGroup/libxunil.git
 [submodule "user/init"]
 	path = user/init
-	url = git@github.com:XunilGroup/xunil-init.git
+	url = https://git.csd4ni3l.hu/XunilGroup/xunil-init.git
 [submodule "user/apps/badapple"]
 	path = user/apps/badapple
-	url = https://github.com/XunilGroup/xunil_badapple.git
+	url = https://git.csd4ni3l.hu/XunilGroup/xunil_badapple.git
 [submodule "user/apps/shell"]
 	path = user/apps/shell
-	url = https://github.com/XunilGroup/xunil_shell.git
+	url = https://git.csd4ni3l.hu/XunilGroup/xunil_shell.git
