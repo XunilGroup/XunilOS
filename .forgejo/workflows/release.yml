@@ -7,7 +7,7 @@ on:
 
 jobs:
   build:
-    name: Build (${{ matrix.karch }})
+    name: Build ${{ matrix.karch }}
     runs-on: ubuntu-latest
 
     strategy:
@@ -56,7 +56,7 @@ jobs:
       - name: Upload ISO artifact
         uses: https://data.forgejo.org/actions/upload-artifact@v3
         with:
-          name: XunilOS-${{ matrix.karch }}.iso
+          name: ${{ matrix.karch }}
           path: XunilOS-${{ matrix.karch }}.iso
           if-no-files-found: error
 
@@ -95,8 +95,8 @@ jobs:
             -d "{\"tag_name\":\"latest\",\"name\":\"Latest Release\",\"draft\":false,\"prerelease\":false,\"body\":\"Automated build for commit ${{ github.sha }}\n\n## Downloads\n- Aarch64: \`XunilOS-aarch64.iso\`\n- x86_64: \`XunilOS-x86_64.iso\`\"}" \
             | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")
 
-          for FILE in downloads/XunilOS-aarch64.iso \
-                      downloads/XunilOS-x86_64.iso; do
+          for FILE in downloads/aarch64/XunilOS-aarch64.iso \
+                      downloads/x86_64/XunilOS-x86_64.iso; do
             curl -sf -X POST \
               -H "Authorization: token $TOKEN" -H "Content-Type: application/octet-stream" \
               "$API/repos/$REPO/releases/$RELEASE_ID/assets?name=$(basename $FILE)" \
