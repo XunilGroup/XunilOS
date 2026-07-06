@@ -127,6 +127,11 @@ pub fn init_input() {
 
 pub fn process_input() {
     loop {
+        let mut guard = match SCHEDULER.try_lock() {
+            Some(g) => g,
+            None => break,
+        };
+
         let input_event = unsafe {
             #[allow(static_mut_refs)]
             match INPUT_CONS.as_mut() {
@@ -138,11 +143,9 @@ pub fn process_input() {
             }
         };
 
-        let mut scheduler = SCHEDULER.lock();
-        if let Some(process) = scheduler.processes.get_mut(&1) {
+        if let Some(process) = guard.processes.get_mut(&1) {
             process.input_buffer.push(input_event);
         }
-        drop(scheduler);
     }
 }
 

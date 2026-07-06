@@ -45,7 +45,7 @@ pub fn set_current_pid(pid: Option<u64>) {
 }
 
 enum SwitchDecision {
-    Switch(Option<UserContext>, u64, u64),
+    Switch(Option<UserContext>, u64, u64, u64),
     Stay,
     Idle,
 }
@@ -139,7 +139,7 @@ impl Locked<Scheduler> {
                     }
                 };
 
-                if current_pid() == Some(new_pid) {
+                if Some(new_pid) == current_pid() || new_pid == previous_pid {
                     if let Some(p) = guard.processes.get_mut(&new_pid) {
                         p.state = ProcessState::Running;
                         p.last_switch_tick = GLOBAL_TICK_COUNT.load(Ordering::Relaxed);
@@ -180,20 +180,20 @@ impl Locked<Scheduler> {
                 #[cfg(target_arch = "aarch64")]
                 let _ = kernel_stack_top;
 
-                SwitchDecision::Switch(ctx_opt, entry, stack_top)
+                SwitchDecision::Switch(ctx_opt, entry, stack_top, new_pid)
             });
 
             match decision {
-                SwitchDecision::Switch(ctx_opt, entry, stack_top) => {
+                SwitchDecision::Switch(ctx_opt, entry, stack_top, _new_pid) => {
                     self.do_context_switch(ctx_opt, entry, stack_top, should_swapgs);
                     return true;
                 }
 
-                SwitchDecision::Stay => return false,
+                SwitchDecision::Stay => {
+                    return false;
+                }
 
                 SwitchDecision::Idle => {
-                    set_current_pid(None);
-
                     #[cfg(target_arch = "x86_64")]
                     {
                         x86_64::instructions::interrupts::enable_and_hlt();
@@ -329,13 +329,15 @@ impl Locked<Scheduler> {
     }
 
     pub fn terminate_process(&self, pid: u64, exit_code: isize) {
-        let mut guard = self.lock();
-        if let Some(process) = guard.processes.get_mut(&pid) {
-            process.state = ProcessState::Zombie;
-            process.in_ready_queue = false;
-            process.input_buffer.clear();
-            process.info.exit_code = exit_code;
-        }
+        safe_lock(|| {
+            let mut guard = self.lock();
+            if let Some(process) = guard.processes.get_mut(&pid) {
+                process.state = ProcessState::Zombie;
+                process.in_ready_queue = false;
+                process.input_buffer.clear();
+                process.info.exit_code = exit_code;
+            }
+        });
     }
 
     pub fn with_process<F, R>(&self, index: u64, f: F) -> Option<R>

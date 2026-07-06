@@ -1,71 +1,49 @@
-use alloc::{
-    collections::btree_map::BTreeMap,
-    string::{String, ToString},
-    vec::Vec,
-};
-use lazy_static::lazy_static;
-
-use crate::driver::io::fs::assets::*;
-
-lazy_static! {
-    static ref FILE_CONTENT: BTreeMap<&'static str, &'static [u8]> = {
-        let mut map = BTreeMap::new();
-        map.insert("testfile", &b"Hello, World!"[..]);
-        map.insert("helloworld.elf", HELLOWORLD_ELF);
-        map.insert("badapple", BADAPPLE_ELF);
-        map.insert("doomgeneric", DOOM_ELF);
-        map.insert("shell", SHELL_ELF);
-        map.insert("doom1.wad", DOOM_WAD);
-        map.insert("doom.cfg", &b""[..]);
-        map.insert("default.cfg", &b""[..]);
-        map
-    };
-}
-
-#[repr(C)]
-#[derive(Clone, Debug)]
-pub struct FILE {
-    pub name: String,
-    pub size: usize,
-    pub data: Vec<u8>,
-    pub cursor: usize,
-    pub writable: bool,
-    pub fd: i64,
-}
-
-impl FILE {
-    pub fn new(name: String, data: Vec<u8>, writable: bool) -> FILE {
-        FILE {
-            name,
-            data: data.clone(),
-            cursor: 0,
-            writable,
-            fd: -1,
-            size: data.len(),
-        }
-    }
-}
+use crate::driver::io::fs::{FILE, FileSystem, fakefs::FAKE_FS};
+use alloc::{string::ToString, sync::Arc, vec::Vec};
 
 pub struct VFS {
     files: Vec<FILE>,
     next_fd: i64,
+    filesystems: Vec<Arc<dyn FileSystem>>,
 }
 
 impl VFS {
     pub fn new() -> VFS {
+        let mut filesystems = Vec::new();
+        filesystems.push(Arc::new(FAKE_FS.clone()) as Arc<dyn FileSystem>);
         VFS {
             files: Vec::new(),
             next_fd: 0,
+            filesystems,
         }
     }
 
-    pub fn open(&mut self, name: &str, mode: &str) -> i64 {
+    pub fn add_filesystem(&mut self, fs: Arc<dyn FileSystem>) {
+        self.filesystems.push(fs);
+    }
+
+    pub fn get_filesystem(&self, path: &str) -> Option<Arc<dyn FileSystem>> {
+        for filesystem in &self.filesystems {
+            if filesystem.exists(path) {
+                return Some(filesystem.clone()); // only arc cloning, this goes faassst
+            }
+        }
+
+        return None;
+    }
+
+    fn open(&mut self, path: &str, mode: &str) -> i64 {
+        let fs = match self.get_filesystem(path) {
+            Some(fs) => fs,
+            None => return -1,
+        };
+
         let is_write = mode.contains("w") || mode.contains("a");
 
         if let Some(file) = self
             .files
             .iter_mut()
-            .find(|file| file.name.as_str() == name)
+            .find(|file| file.path.as_str() == path)
         {
             file.cursor = 0;
             file.writable = is_write;
@@ -76,12 +54,13 @@ impl VFS {
         let fd = self.next_fd;
         self.next_fd += 1;
 
-        let empty_data = &"".as_bytes();
-
-        let data = FILE_CONTENT.get(name).unwrap_or(empty_data);
+        let data = match fs.read_file(path) {
+            Ok(data) => data,
+            Err(_) => return -1,
+        };
 
         let file = FILE {
-            name: name.to_string(),
+            path: path.to_string(),
             data: data.to_vec(),
             cursor: 0,
             writable: is_write,
@@ -94,7 +73,7 @@ impl VFS {
         fd
     }
 
-    pub fn close(&mut self, fd: i64) -> i32 {
+    fn close(&mut self, fd: i64) -> i32 {
         if let Some(file_pos) = self.files.iter().position(|file| file.fd == fd) {
             self.files.remove(file_pos);
             0
@@ -103,7 +82,7 @@ impl VFS {
         }
     }
 
-    pub fn lseek(&mut self, fd: i64, offset: i64, whence: i32) -> i64 {
+    fn lseek(&mut self, fd: i64, offset: i64, whence: i32) -> i64 {
         let f = match self.files.iter_mut().find(|file| file.fd == fd) {
             Some(f) => f,
             None => return -1,
@@ -143,7 +122,7 @@ impl VFS {
         f.cursor as i64
     }
 
-    pub fn read(&mut self, fd: i64, len: usize) -> Option<(*const u8, usize)> {
+    fn read(&mut self, fd: i64, len: usize) -> Option<(*const u8, usize)> {
         if let Some(f) = self.files.iter_mut().find(|file| file.fd == fd) {
             if f.cursor > f.size {
                 return Some((f.data.as_ptr(), 0));
@@ -161,15 +140,22 @@ impl VFS {
         }
     }
 
-    pub fn write(&mut self, fd: i64, data: &[u8]) -> Option<usize> {
+    fn write(&mut self, fd: i64, data: &[u8]) -> Option<usize> {
+        let path = {
+            let file = self.files.iter_mut().find(|f| f.fd == fd)?;
+            if !file.writable {
+                return None;
+            }
+            file.path.clone()
+        };
+
+        let fs = self.get_filesystem(&path)?;
+
         let file = self.files.iter_mut().find(|f| f.fd == fd)?;
-
-        if !file.writable {
-            return None;
-        }
-
         file.data.extend_from_slice(data);
         file.size = file.data.len();
+        fs.write_file(&file.path, &file.data);
+
         Some(data.len())
     }
 }
@@ -177,19 +163,14 @@ impl VFS {
 pub static mut VFS_INSTANCE: Option<VFS> = None;
 
 pub fn init_vfs() {
-    unsafe {
-        VFS_INSTANCE = Some(VFS {
-            files: Vec::new(),
-            next_fd: 3,
-        })
-    }
+    unsafe { VFS_INSTANCE = Some(VFS::new()) }
 }
 
 #[unsafe(no_mangle)]
-pub fn vfs_open(name: &str, mode: &str) -> i64 {
+pub fn vfs_open(path: &str, mode: &str) -> i64 {
     #[allow(static_mut_refs)]
     unsafe {
-        VFS_INSTANCE.as_mut().unwrap().open(name, mode)
+        VFS_INSTANCE.as_mut().unwrap().open(path, mode)
     }
 }
 

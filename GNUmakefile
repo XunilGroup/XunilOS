@@ -32,7 +32,7 @@ debug-x86_64: edk2-ovmf $(IMAGE_NAME).iso
 		-serial stdio \
 		-drive if=pflash,unit=0,format=raw,file=edk2-ovmf/ovmf-code-$(KARCH).fd,readonly=on \
 		-cdrom $(IMAGE_NAME).iso \
-		-d in_asm,int,mmu -dfilter 0xffffffff80000000..0xffffffff80010000 -D /tmp/qemu_trace.log 2>/dev/null \
+		-d in_asm,int,mmu -D /tmp/qemu_trace.log 2>/dev/null \
 		$(QEMUFLAGS)
 
 .PHONY: run-aarch64

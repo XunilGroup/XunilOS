@@ -1,4 +1,7 @@
-use crate::task::scheduler::{SCHEDULER, current_pid};
+use crate::{
+    arch::arch::safe_lock,
+    task::scheduler::{SCHEDULER, current_pid},
+};
 
 #[cfg(target_arch = "x86_64")]
 #[repr(C)]
@@ -71,7 +74,7 @@ pub struct UserContext {
 #[unsafe(no_mangle)]
 pub extern "C" fn ctx_save(regs: *const UserContext) {
     if let Some(pid) = current_pid() {
-        let mut guard = SCHEDULER.lock();
+        let mut guard = safe_lock(|| SCHEDULER.lock());
         if let Some(process) = guard.processes.get_mut(&pid) {
             let saved_ctx = unsafe { core::ptr::read_unaligned(regs) };
 

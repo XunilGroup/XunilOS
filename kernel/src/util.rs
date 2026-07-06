@@ -46,6 +46,10 @@ impl<A> Locked<A> {
     pub fn lock(&self) -> MutexGuard<A> {
         self.inner.lock()
     }
+
+    pub fn try_lock(&self) -> Option<MutexGuard<'_, A>> {
+        self.inner.try_lock()
+    }
 }
 
 pub fn test_performance<F: FnOnce()>(function: F) {

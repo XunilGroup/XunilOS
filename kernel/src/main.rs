@@ -1,6 +1,7 @@
 #![no_std]
 #![no_main]
 #![cfg_attr(target_arch = "x86_64", feature(abi_x86_interrupt))]
+#![feature(core_float_math)]
 #![feature(naked_functions_rustic_abi)]
 
 extern crate alloc;
@@ -198,7 +199,9 @@ pub unsafe extern "C" fn kernel_main_aarch64(mapper: &mut AArchPageTable) -> ! {
 
     run_elf(INIT_ELF, false, true);
 
-    loop {}
+    loop {
+        println!("This should not happen!")
+    }
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -246,7 +249,9 @@ pub unsafe fn kernel_main_x86_64() -> ! {
 
     run_elf(INIT_ELF, false, true);
 
-    loop {}
+    loop {
+        println!("This should not happen!")
+    }
 }
 
 struct BufWriter<'a> {

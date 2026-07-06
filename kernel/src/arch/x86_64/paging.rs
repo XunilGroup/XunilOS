@@ -8,7 +8,7 @@ use x86_64::{
     },
 };
 
-use crate::arch::arch::{HHDM_OFFSET, XunilFrameAllocator};
+use crate::arch::arch::{HHDM_OFFSET, XunilFrameAllocator, safe_lock};
 
 unsafe fn active_level_4_table(mem_offset: VirtAddr) -> &'static mut PageTable {
     let (level_4_table, _) = Cr3::read();
@@ -62,22 +62,24 @@ pub fn create_and_map_multiple_pages(
     base: u64,
     flags: PageTableFlags,
 ) {
-    let mut frame_allocator = FRAME_ALLOCATOR_X86_64.lock();
+    safe_lock(|| {
+        let mut frame_allocator = FRAME_ALLOCATOR_X86_64.lock();
 
-    for i in 0..page_count {
-        let frame = frame_allocator.allocate_frame().unwrap();
+        for i in 0..page_count {
+            let frame = frame_allocator.allocate_frame().unwrap();
 
-        let virt_addr = VirtAddr::new(base + i as u64 * 4096);
-        let page = Page::<Size4KiB>::containing_address(virt_addr);
+            let virt_addr = VirtAddr::new(base + i as u64 * 4096);
+            let page = Page::<Size4KiB>::containing_address(virt_addr);
 
-        unsafe {
-            mapper
-                .map_to(page, frame, flags, &mut *frame_allocator)
-                .unwrap()
-                .flush();
+            unsafe {
+                mapper
+                    .map_to(page, frame, flags, &mut *frame_allocator)
+                    .unwrap()
+                    .flush();
+            }
         }
-    }
-    drop(frame_allocator);
+        drop(frame_allocator);
+    });
 }
 
 pub static FRAME_ALLOCATOR_X86_64: Mutex<XunilFrameAllocator> =

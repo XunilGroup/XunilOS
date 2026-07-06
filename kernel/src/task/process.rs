@@ -7,6 +7,7 @@ use crate::{
     task::context::UserContext,
 };
 
+#[derive(Debug)]
 pub enum ProcessState {
     Ready,
     Running,

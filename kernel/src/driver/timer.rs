@@ -3,6 +3,10 @@ use core::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
+use crate::driver::io::input::process_input;
+#[cfg(target_arch = "x86_64")]
+use crate::driver::io::ps2::process_scancodes;
+
 pub static TIMER: Timer = Timer::new();
 
 pub struct Timer {
@@ -27,6 +31,9 @@ impl Timer {
     }
 
     pub fn interrupt(&self) {
+        #[cfg(target_arch = "x86_64")]
+        process_scancodes();
+        process_input();
         self.interrupt_count.fetch_add(1, Ordering::Relaxed);
     }
 

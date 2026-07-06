@@ -117,23 +117,25 @@ fn map_framebuffer() -> isize {
             let mut map_page = |virt: u64, phys: u64| unsafe {
                 let frame = PhysFrame::<Size4KiB>::containing_address(PhysAddr::new(phys));
                 let page = Page::<Size4KiB>::containing_address(VirtAddr::new(virt));
-                let mut frame_allocator = FRAME_ALLOCATOR.lock();
+                safe_lock(|| {
+                    let mut frame_allocator = FRAME_ALLOCATOR.lock();
 
-                address_space
-                    .mapper
-                    .map_to(
-                        page,
-                        frame,
-                        PageTableFlags::PRESENT
-                            | PageTableFlags::WRITABLE
-                            | PageTableFlags::USER_ACCESSIBLE
-                            | PageTableFlags::NO_EXECUTE,
-                        &mut *frame_allocator,
-                    )
-                    .unwrap()
-                    .flush();
+                    address_space
+                        .mapper
+                        .map_to(
+                            page,
+                            frame,
+                            PageTableFlags::PRESENT
+                                | PageTableFlags::WRITABLE
+                                | PageTableFlags::USER_ACCESSIBLE
+                                | PageTableFlags::NO_EXECUTE,
+                            &mut *frame_allocator,
+                        )
+                        .unwrap()
+                        .flush();
 
-                drop(frame_allocator);
+                    drop(frame_allocator);
+                });
             };
             #[cfg(target_arch = "aarch64")]
             let map_page = |virt: u64, phys: u64| {
@@ -249,11 +251,6 @@ fn input_read(user_ptr: *mut InputEvent, max_events: isize) -> isize {
     if pid != 1 {
         return -1;
     }
-
-    #[cfg(target_arch = "x86_64")]
-    process_scancodes();
-
-    process_input();
 
     if max_events <= 0 || user_ptr.is_null() {
         return -1;
@@ -583,21 +580,23 @@ fn shm_open(name_ptr: isize, size: isize) -> isize {
 
                 let page = Page::<Size4KiB>::containing_address(VirtAddr::new(virt));
 
-                let mut frame_allocator = FRAME_ALLOCATOR.lock();
+                safe_lock(|| {
+                    let mut frame_allocator = FRAME_ALLOCATOR.lock();
 
-                address_space
-                    .mapper
-                    .map_to(
-                        page,
-                        frame,
-                        PageTableFlags::PRESENT
-                            | PageTableFlags::WRITABLE
-                            | PageTableFlags::USER_ACCESSIBLE
-                            | PageTableFlags::NO_EXECUTE,
-                        &mut *frame_allocator,
-                    )
-                    .unwrap()
-                    .flush();
+                    address_space
+                        .mapper
+                        .map_to(
+                            page,
+                            frame,
+                            PageTableFlags::PRESENT
+                                | PageTableFlags::WRITABLE
+                                | PageTableFlags::USER_ACCESSIBLE
+                                | PageTableFlags::NO_EXECUTE,
+                            &mut *frame_allocator,
+                        )
+                        .unwrap()
+                        .flush();
+                });
             };
 
             #[cfg(target_arch = "aarch64")]
@@ -644,15 +643,17 @@ fn shm_open(name_ptr: isize, size: isize) -> isize {
 
                 #[cfg(target_arch = "x86_64")]
                 for _ in 0..page_count {
-                    let mut frame_allocator = FRAME_ALLOCATOR.lock();
+                    safe_lock(|| {
+                        let mut frame_allocator = FRAME_ALLOCATOR.lock();
 
-                    phys_pages.push(
-                        frame_allocator
-                            .allocate_frame()
-                            .expect("Could not allocate frame")
-                            .start_address()
-                            .as_u64(),
-                    );
+                        phys_pages.push(
+                            frame_allocator
+                                .allocate_frame()
+                                .expect("Could not allocate frame")
+                                .start_address()
+                                .as_u64(),
+                        );
+                    });
                 }
 
                 let id = NEXT_SHM_ID.fetch_add(1, Ordering::Relaxed);
