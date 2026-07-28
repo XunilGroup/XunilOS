@@ -55,3 +55,9 @@ qemu-system-aarch64 -M virt,gic-version=2,secure=off -cpu cortex-a72 -device ram
 - IPC support
 - Syscalls to call back to the kernel
 - Primitives, Framebuffer and font rendering
+
+## Mirrors
+
+[![Forgejo](https://img.shields.io/badge/Forgejo-git.csd4ni3l.hu-1e90ff)](https://git.csd4ni3l.hu/XunilGroup/XunilOS)
+[![GitHub](https://img.shields.io/badge/GitHub-github.com-181717)](https://github.com/XunilGroup/XunilOS)
+[![Codeberg](https://img.shields.io/badge/Codeberg-codeberg.org-2185D0)](https://codeberg.org/XunilGroup/XunilOS)
