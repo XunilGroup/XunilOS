@@ -11,6 +11,7 @@ pub static ALLOCATOR: Locked<LinkedListAllocator> = Locked::new(LinkedListAlloca
 pub const HEAP_START: usize = 0xffffffff90000000;
 pub const HEAP_SIZE: usize = 512 * 1024 * 1024; // 512 MiB
 
+#[unsafe(no_mangle)]
 pub fn init_heap(mapper: &mut OffsetPageTable) -> Result<(), MapToError<Size4KiB>> {
     let page_count = HEAP_SIZE / 4096;
 

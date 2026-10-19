@@ -210,8 +210,7 @@ pub unsafe fn run_next(ctx: *const UserContext, user_rsp: u64, user_cs: u64, use
     core::arch::naked_asm!(
         // rdi = ctx, rsi = user_rsp, rdx = user_cs, rcx = user_ss
         "mov gs:[0], rsi",
-        "mov rax, rcx",
-        "and eax, 0xFFFC",
+        "mov ax, cx",
         "mov ds, ax",
         "mov es, ax",
         // save ctx ptr on stack, then build iret frame
