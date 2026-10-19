@@ -1,15 +1,15 @@
 if [ "$KARCH" = "aarch64" ]; then
     CC="aarch64-linux-gnu-gcc"
     ARCH_FLAGS="-march=armv8-a+nosimd -mabi=lp64"
-    SYS_INCLUDES="/usr/include /usr/aarch64-linux-gnu/include"
 elif [ "$KARCH" = "x86_64" ]; then
     CC="gcc"
     ARCH_FLAGS="-m64 -mno-mmx -mno-avx"
-    SYS_INCLUDES="/usr/include /usr/include/x86_64-linux-gnu"
 else
     echo "Error: Unsupported KARCH: $KARCH"
     exit 1
 fi
+
+SYS_INCLUDES=$(echo | $CC -E -Wp,-v -xc /dev/null 2>&1 | sed -n '/^#include/,/^End of search/p' | sed -n 's/^ \(.*\)/\1/p')
 
 GCC_INCLUDES=$($CC -print-file-name=include)
 INCLUDE_FLAGS="-I../../libxunil/include -I$GCC_INCLUDES"
