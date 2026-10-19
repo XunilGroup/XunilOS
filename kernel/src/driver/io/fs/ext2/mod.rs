@@ -5,18 +5,35 @@ use alloc::vec;
 use alloc::{sync::Arc, vec::Vec};
 
 pub mod fs;
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Ext2InodeType {
+    FIFO = 0x1000,
+    CharDevice = 0x2000,
+    Directory = 0x4000,
+    BlockDevice = 0x6000,
+    File = 0x8000,
+    SymbolicLink = 0xA000,
+    UnixSocket = 0xC000,
+}
 
-fn read_u32_from_offset(buf: &[u8], off: &mut usize) -> u32 {
+pub fn read_u32_from_offset(buf: &[u8], off: &mut usize) -> u32 {
     let value = u32::from_le_bytes(buf[*off..*off + 4].try_into().unwrap());
     *off += 4;
     return value;
 }
 
-fn read_u16_from_offset(buf: &[u8], off: &mut usize) -> u16 {
+pub fn read_u16_from_offset(buf: &[u8], off: &mut usize) -> u16 {
     let value = u16::from_le_bytes(buf[*off..*off + 2].try_into().unwrap());
     *off += 2;
     return value;
 }
+
+pub fn read_u8_from_offset(buf: &[u8], off: &mut usize) -> u8 {
+    let value = u8::from_le_bytes(buf[*off..*off + 1].try_into().unwrap());
+    *off += 1;
+    return value;
+}
+
 pub fn read_raw_bytes_from_disk(
     device: Arc<dyn BlockDevice>,
     offset: u64,
@@ -91,6 +108,21 @@ impl Ext2Inode {
                 off += 12;
                 osd2
             },
+        }
+    }
+
+    fn inode_type(&self) -> Option<Ext2InodeType> {
+        let inode_mode = self.i_mode;
+        let mask = (inode_mode >> 12) & 0xF;
+        match mask {
+            0x1000 => Some(Ext2InodeType::FIFO),
+            0x2000 => Some(Ext2InodeType::CharDevice),
+            0x4000 => Some(Ext2InodeType::Directory),
+            0x6000 => Some(Ext2InodeType::BlockDevice),
+            0x8000 => Some(Ext2InodeType::File),
+            0xA000 => Some(Ext2InodeType::SymbolicLink),
+            0xC000 => Some(Ext2InodeType::UnixSocket),
+            _ => None,
         }
     }
 }

@@ -3,12 +3,17 @@ use crate::driver::io::{
     fs::{
         FSError, FileSystem,
         ext2::{
-            BlockGroupDescriptor, Ext2Inode, Ext2Superblock, read_raw_bytes_from_disk,
-            read_u16_from_offset, read_u32_from_offset,
+            BlockGroupDescriptor, Ext2Inode, Ext2InodeType, Ext2Superblock,
+            read_raw_bytes_from_disk, read_u8_from_offset, read_u16_from_offset,
+            read_u32_from_offset,
         },
     },
 };
-use alloc::{string::String, sync::Arc, vec::Vec};
+use alloc::{
+    string::{String, ToString},
+    sync::Arc,
+    vec::Vec,
+};
 use core::f64::math::ceil;
 
 struct Ext2FileSystem {
@@ -59,21 +64,19 @@ impl Ext2FileSystem {
             return None;
         }
 
-        let mut raw_block_group_opt = read_raw_bytes_from_disk(
-            self.device.clone(),
-            self.block_offset
-                + 1024
-                + 1024
-                + (block_group_n * (size_of::<BlockGroupDescriptor>() as u64)),
-            size_of::<BlockGroupDescriptor>() as u32,
-        );
+        let bgdt_block = if self.block_size == 1024 { 2 } else { 1 };
+        let bgdt_offset = self.block_offset + bgdt_block * self.block_size as u64;
 
-        match raw_block_group_opt {
-            Some(mut raw_block_group) => Some(BlockGroupDescriptor::from_byte_array(
-                raw_block_group.as_mut_slice(),
-            )),
-            _ => None,
-        }
+        let descriptor_offset =
+            bgdt_offset + block_group_n * size_of::<BlockGroupDescriptor>() as u64;
+
+        let mut raw = read_raw_bytes_from_disk(
+            self.device.clone(),
+            descriptor_offset,
+            size_of::<BlockGroupDescriptor>() as u32,
+        )?;
+
+        Some(BlockGroupDescriptor::from_byte_array(raw.as_mut_slice()))
     }
 
     pub fn get_block(&self, fs_block: u32) -> Option<Vec<u8>> {
@@ -107,20 +110,103 @@ impl Ext2FileSystem {
 
         Some(Ext2Inode::from_byte_array(inode_bytes))
     }
+
+    fn traverse_filesystem_tree(&self, path: &str) -> Result<Ext2Inode, FSError> {
+        let path_parts: Vec<&str> = path
+            .split("/")
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<&str>>();
+
+        if path_parts.is_empty() {
+            return Err(FSError::InvalidPath);
+        }
+
+        let mut inode;
+        let mut inode_n = 2;
+        for path_n in 0..path_parts.len() {
+            inode = match self.get_inode(inode_n) {
+                Some(inode) => inode,
+                None => return Err(FSError::IOError),
+            };
+
+            if path_n != path_parts.len() - 1 {
+                match inode.inode_type().unwrap_or(Ext2InodeType::CharDevice) {
+                    Ext2InodeType::Directory => {
+                        let mut dir_found = false;
+                        for &block in &inode.i_block[..12] {
+                            if block == 0 {
+                                break;
+                            }
+
+                            let block_data = match self.get_block(block) {
+                                Some(block_data) => block_data,
+                                None => return Err(FSError::IOError),
+                            };
+
+                            let mut offset = 0;
+
+                            while offset < block_data.len() {
+                                let entry_start = offset;
+
+                                let inode =
+                                    read_u32_from_offset(block_data.as_slice(), &mut offset);
+                                let rec_len =
+                                    read_u16_from_offset(block_data.as_slice(), &mut offset);
+                                let name_len =
+                                    read_u8_from_offset(block_data.as_slice(), &mut offset);
+                                let file_type =
+                                    read_u8_from_offset(block_data.as_slice(), &mut offset);
+
+                                if inode != 0 {
+                                    let name_bytes =
+                                        &block_data[offset..offset + name_len as usize];
+                                    let name = core::str::from_utf8(name_bytes).unwrap_or("");
+
+                                    if name == path_parts[path_n] {
+                                        inode_n = inode as u64;
+                                        dir_found = true;
+                                        break;
+                                    }
+                                }
+
+                                if rec_len == 0 {
+                                    break;
+                                }
+
+                                offset = entry_start + rec_len as usize;
+                            }
+
+                            if dir_found {
+                                break;
+                            }
+                        }
+
+                        if !dir_found {
+                            return Err(FSError::NotFound);
+                        }
+                    }
+                    _ => return Err(FSError::InvalidPath),
+                };
+            } else {
+                return Ok(inode);
+            }
+        }
+
+        return Err(FSError::NotFound);
+    }
 }
 
 impl FileSystem for Ext2FileSystem {
     fn read_file(&self, path: &str) -> Result<Vec<u8>, FSError> {
-        // TODO: traverse path to get inode count, for testing, inode n is 0
-        let inode_n = 0;
-        let inode = match self.get_inode(inode_n) {
-            Some(inode) => inode,
-            None => return Err(FSError::IOError),
-        };
+        let inode = self.traverse_filesystem_tree(path)?;
+
+        if inode.inode_type() != Some(Ext2InodeType::File) {
+            return Err(FSError::PermissionDenied);
+        }
 
         let mut data = Vec::<u8>::new();
 
-        for &block in &inode.i_block {
+        for &block in &inode.i_block[..12] {
             if block == 0 {
                 break;
             }
@@ -133,6 +219,8 @@ impl FileSystem for Ext2FileSystem {
             data.extend_from_slice(&block_data);
         }
 
+        data.truncate(inode.i_size as usize);
+
         Ok(data)
     }
 
@@ -141,10 +229,56 @@ impl FileSystem for Ext2FileSystem {
     }
 
     fn list_directory(&self, path: &str) -> Result<Vec<String>, FSError> {
-        unimplemented!()
+        let final_directory_inode = self.traverse_filesystem_tree(path)?;
+
+        if final_directory_inode.inode_type() != Some(Ext2InodeType::Directory) {
+            return Err(FSError::PermissionDenied);
+        }
+
+        let mut entries = Vec::new();
+
+        for &block in &final_directory_inode.i_block[..12] {
+            if block == 0 {
+                break;
+            }
+
+            let block_data = match self.get_block(block) {
+                Some(block_data) => block_data,
+                None => return Err(FSError::IOError),
+            };
+
+            let mut offset = 0;
+
+            while offset < block_data.len() {
+                let entry_start = offset;
+
+                let inode = read_u32_from_offset(block_data.as_slice(), &mut offset);
+                let rec_len = read_u16_from_offset(block_data.as_slice(), &mut offset);
+                let name_len = read_u8_from_offset(block_data.as_slice(), &mut offset);
+                let file_type = read_u8_from_offset(block_data.as_slice(), &mut offset);
+
+                if inode != 0 {
+                    let name_bytes = &block_data[offset..offset + name_len as usize];
+                    let name = core::str::from_utf8(name_bytes).unwrap_or("");
+
+                    entries.push(name.to_string());
+                }
+
+                if rec_len == 0 {
+                    break;
+                }
+
+                offset = entry_start + rec_len as usize;
+            }
+        }
+
+        Ok(entries)
     }
 
     fn exists(&self, path: &str) -> bool {
-        unimplemented!()
+        match self.traverse_filesystem_tree(path) {
+            Ok(_) => true,
+            Err(_) => false,
+        }
     }
 }
