@@ -2,7 +2,7 @@ use core::arch::naked_asm;
 
 use crate::{
     arch::{
-        arch::{do_interrupt, serial_print},
+        arch::do_interrupt,
         x86_64::gdt,
     },
     driver::io::ps2::{keyboard_interrupt, mouse_interrupt, push_scancode},

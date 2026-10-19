@@ -17,10 +17,10 @@ pub trait BlockDevice: Send + Sync {
 pub struct MockBlockDevice {}
 
 impl BlockDevice for MockBlockDevice {
-    fn read_sectors(&self, sector: u64, count: u32, buffer: &mut [u8]) -> Result<(), BlockError> {
+    fn read_sectors(&self, _sector: u64, _count: u32, _buffer: &mut [u8]) -> Result<(), BlockError> {
         unimplemented!()
     }
-    fn write_sectors(&self, sector: u64, count: u32, buffer: &[u8]) -> Result<(), BlockError> {
+    fn write_sectors(&self, _sector: u64, _count: u32, _buffer: &[u8]) -> Result<(), BlockError> {
         unimplemented!()
     }
     fn sector_size(&self) -> u32 {
