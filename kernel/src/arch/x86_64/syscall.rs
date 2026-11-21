@@ -80,9 +80,13 @@ pub fn init_syscalls() {
         wrmsr(IA32_GS_BASE, 0);
 
         let kernel_cs = (GDT.1.0.0 & !0b11) as u64;
-        let user_ds = (GDT.1.3.0 & !0b11) as u64;
 
-        let sysret_base = user_ds - 8;
+        // Keep RPL=3 in the SYSRET base. Intel forces the SS RPL to 3 on
+        // SYSRET, but AMD takes it from STAR[63:48]. Masking the RPL off
+        // makes SS become 0x20 (RPL0) on AMD; the next interrupt then
+        // faults in iretq with #GP(SS selector).
+        // 0x23 - 8 = 0x1B => SS = 0x23, CS = 0x2B.
+        let sysret_base = GDT.1.3.0 as u64 - 8;
 
         let star = (kernel_cs << 32) | (sysret_base << 48);
         wrmsr(IA32_STAR, star);

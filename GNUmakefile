@@ -23,6 +23,7 @@ run-x86_64: edk2-ovmf $(IMAGE_NAME).iso
 		-serial stdio \
 		-drive if=pflash,unit=0,format=raw,file=edk2-ovmf/ovmf-code-$(KARCH).fd,readonly=on \
 		-cdrom $(IMAGE_NAME).iso \
+		-accel kvm \
 		$(QEMUFLAGS)
 
 .PHONY: debug-x86_64
