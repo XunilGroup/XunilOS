@@ -1,6 +1,9 @@
 name: Build & Release XunilOS
 on:
   push:
+    paths-ignore:
+      - ".forgejo/**"
+      - "**/README*"
     branches:
       - main
 jobs:
