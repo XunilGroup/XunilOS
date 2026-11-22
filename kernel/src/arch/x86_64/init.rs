@@ -6,13 +6,9 @@ use crate::{
         kmi::setup_kmi,
         paging::{FRAME_ALLOCATOR_X86_64, initialize_paging_x86_64},
         syscall::init_syscalls,
-    },
-    config::TIMER_FREQUENCY_HZ,
-    driver::{
-        io::{block::ahci::discover_drives, fs::vfs::init_vfs},
-        ipc::init_ipc,
-    },
-    mm::shm::init_shm,
+    }, config::TIMER_FREQUENCY_HZ, driver::{
+        io::{block::discover_ahci, fs::vfs::init_vfs, pci::discover_de ipc::init_ipc,
+    }, mm::shm::init_shm,
 };
 
 use x86_64::{
@@ -97,7 +93,8 @@ pub fn init_x86_64<'a>(
     init_ipc();
     init_shm();
     init_vfs();
-    discover_drives();
+    let pci_devices = discover_devices();
+    discover_ahci(pci_devices);
 
     return mapper;
 }
