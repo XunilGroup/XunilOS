@@ -63,6 +63,14 @@ pub fn write_pci_config(bus: u8, slot: u8, function: u8, offset: u8, data: u32) 
     }
 }
 
+#[cfg(target_arch = "aarch64")]
+pub fn read_pci_config(bus: u8, slot: u8, function: u8, offset: u8) -> u32 {
+    0
+}
+
+#[cfg(target_arch = "aarch64")]
+pub fn write_pci_config(bus: u8, slot: u8, function: u8, offset: u8, data: u32) {}
+
 pub fn read_bar(bus: u8, slot: u8, function: u8, index: u8) -> Option<PCIBar> {
     let raw = read_pci_config(bus, slot, function, 0x10 + 4 * index);
 

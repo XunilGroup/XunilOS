@@ -97,8 +97,12 @@ pub fn init_x86_64<'a>(
     init_ipc();
     init_shm();
     init_vfs();
-    let pci_devices = discover_devices();
-    discover_ahci(pci_devices, &mut mapper);
+
+    #[cfg(target_arch = "x86_64")]
+    {
+        let pci_devices = discover_devices();
+        discover_ahci(pci_devices, &mut mapper);
+    }
 
     return mapper;
 }
