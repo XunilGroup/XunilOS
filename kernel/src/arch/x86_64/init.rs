@@ -6,9 +6,13 @@ use crate::{
         kmi::setup_kmi,
         paging::{FRAME_ALLOCATOR_X86_64, initialize_paging_x86_64},
         syscall::init_syscalls,
-    }, config::TIMER_FREQUENCY_HZ, driver::{
-        io::{block::discover_ahci, fs::vfs::init_vfs, pci::discover_de ipc::init_ipc,
-    }, mm::shm::init_shm,
+    },
+    config::TIMER_FREQUENCY_HZ,
+    driver::{
+        io::{block::ahci::discover_ahci, fs::vfs::init_vfs, pci::discover_devices},
+        ipc::init_ipc,
+    },
+    mm::shm::init_shm,
 };
 
 use x86_64::{
