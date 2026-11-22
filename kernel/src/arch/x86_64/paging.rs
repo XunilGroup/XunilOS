@@ -8,6 +8,8 @@ use x86_64::{
     },
 };
 
+pub const MMIO_VIRT_BASE: u64 = 0xFFFF_FF00_0000_0000;
+
 use crate::arch::arch::{HHDM_OFFSET, XunilFrameAllocator, safe_lock};
 
 unsafe fn active_level_4_table(mem_offset: VirtAddr) -> &'static mut PageTable {
@@ -74,6 +76,37 @@ pub fn create_and_map_multiple_pages(
             unsafe {
                 mapper
                     .map_to(page, frame, flags, &mut *frame_allocator)
+                    .unwrap()
+                    .flush();
+            }
+        }
+        drop(frame_allocator);
+    });
+}
+
+pub fn map_mmio(base: u64, mapper: &mut OffsetPageTable, size: u64) {
+    safe_lock(|| {
+        let mut frame_allocator = FRAME_ALLOCATOR_X86_64.lock();
+
+        let pages = size / 4096;
+
+        for i in 0..pages {
+            let frame = PhysFrame::containing_address(PhysAddr::new(base + i * 4096));
+
+            let virt_addr = VirtAddr::new(MMIO_VIRT_BASE + i as u64 * 4096);
+            let page = Page::<Size4KiB>::containing_address(virt_addr);
+
+            unsafe {
+                mapper
+                    .map_to(
+                        page,
+                        frame,
+                        PageTableFlags::PRESENT
+                            | PageTableFlags::WRITABLE
+                            | PageTableFlags::NO_CACHE
+                            | PageTableFlags::NO_EXECUTE,
+                        &mut *frame_allocator,
+                    )
                     .unwrap()
                     .flush();
             }
