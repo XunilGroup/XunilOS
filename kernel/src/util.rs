@@ -83,3 +83,14 @@ pub const fn align_up(addr: u64, align: u64) -> u64 {
         }
     }
 }
+
+#[inline]
+pub fn wait_until(mut cond: impl FnMut() -> bool, tries: usize) -> bool {
+    for _ in 0..tries {
+        if cond() {
+            return true;
+        }
+        core::hint::spin_loop();
+    }
+    false
+}

@@ -93,7 +93,7 @@ pub fn map_mmio(base: u64, mapper: &mut OffsetPageTable, size: u64) {
         for i in 0..pages {
             let frame = PhysFrame::containing_address(PhysAddr::new(base + i * 4096));
 
-            let virt_addr = VirtAddr::new(MMIO_VIRT_BASE + i as u64 * 4096);
+            let virt_addr = VirtAddr::new(MMIO_VIRT_BASE + base + i as u64 * 4096);
             let page = Page::<Size4KiB>::containing_address(virt_addr);
 
             unsafe {
@@ -104,6 +104,7 @@ pub fn map_mmio(base: u64, mapper: &mut OffsetPageTable, size: u64) {
                         PageTableFlags::PRESENT
                             | PageTableFlags::WRITABLE
                             | PageTableFlags::NO_CACHE
+                            | PageTableFlags::WRITE_THROUGH
                             | PageTableFlags::NO_EXECUTE,
                         &mut *frame_allocator,
                     )
