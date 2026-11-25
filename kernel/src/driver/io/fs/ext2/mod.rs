@@ -1,3 +1,4 @@
+use core::f64::math::ceil;
 use core::slice;
 
 use crate::driver::io::{block::BlockDevice, fs::FSError};
@@ -42,11 +43,10 @@ pub fn read_raw_bytes_from_disk(
     let mut buffer_vec = vec![0u8; size as usize];
     let mut buffer_slice = buffer_vec.as_mut_slice();
 
-    match device.read_sectors(
-        offset + (size as u64), // block groups come after
-        size,
-        buffer_slice,
-    ) {
+    let sector = offset / (device.sector_size() as u64);
+    let count = (ceil(size as f64 / device.sector_size() as f64)) as u32;
+
+    match device.read_sectors(sector, count, buffer_slice) {
         Err(_) => return None,
         _ => Some(buffer_vec),
     }
