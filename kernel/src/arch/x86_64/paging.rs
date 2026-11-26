@@ -1,3 +1,5 @@
+use core::sync::atomic::Ordering;
+
 use spin::mutex::Mutex;
 use x86_64::{
     PhysAddr, VirtAddr,
@@ -114,6 +116,14 @@ pub fn map_mmio(base: u64, mapper: &mut OffsetPageTable, size: u64) {
         }
         drop(frame_allocator);
     });
+}
+
+pub fn alloc_dma_frame() -> Option<(u64, *mut u8)> {
+    let mut fa = FRAME_ALLOCATOR_X86_64.lock();
+    let frame = fa.allocate_frame()?;
+    let phys = frame.start_address().as_u64();
+    let virt = phys + HHDM_OFFSET.load(Ordering::Relaxed);
+    Some((phys, virt as *mut u8))
 }
 
 pub static FRAME_ALLOCATOR_X86_64: Mutex<XunilFrameAllocator> =

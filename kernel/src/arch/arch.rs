@@ -41,10 +41,10 @@ const UART: *mut u8 = 0x0900_0000 as *mut u8;
 pub static HHDM_OFFSET: AtomicU64 = AtomicU64::new(0);
 
 #[cfg(target_arch = "aarch64")]
-type PageTable = AArchPageTable;
+pub type PageTable = AArchPageTable;
 
 #[cfg(target_arch = "x86_64")]
-type PageTable<'a> = OffsetPageTable<'a>;
+pub type PageTable<'a> = OffsetPageTable<'a>;
 
 pub static mut KERNEL_MAPPER: Mutex<Option<PageTable>> = Mutex::new(None);
 
