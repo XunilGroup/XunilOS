@@ -339,14 +339,18 @@ pub struct HbaPrdtEntry {
     pub dbc: u32,  // bits 21:0 byte count (even), bit 31 interrupt
 }
 
+pub const HBA_CMD_TBL_PRDT_MAX: usize = 248;
+
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct HbaCmdTbl {
-    pub cfis: [u8; 64],                // 0x00 Command FIS
-    pub acmd: [u8; 16],                // 0x40 ATAPI command, 12 or 16 bytes
-    pub rsv: [u8; 48],                 // 0x50 Reserved
-    pub prdt_entry: [HbaPrdtEntry; 1], // 0x80 Physical region descriptor table entries
+    pub cfis: [u8; 64], // 0x00 Command FIS
+    pub acmd: [u8; 16], // 0x40 ATAPI command, 12 or 16 bytes
+    pub rsv: [u8; 48],  // 0x50 Reserved
+    pub prdt_entry: [HbaPrdtEntry; HBA_CMD_TBL_PRDT_MAX],
 }
+
+const _: () = assert!(core::mem::size_of::<HbaCmdTbl>() == 4096);
 
 impl Default for HbaCmdTbl {
     fn default() -> Self {
@@ -354,7 +358,7 @@ impl Default for HbaCmdTbl {
             cfis: [0; 64],
             acmd: [0; 16],
             rsv: [0; 48],
-            prdt_entry: [HbaPrdtEntry::default()],
+            prdt_entry: [HbaPrdtEntry::default(); HBA_CMD_TBL_PRDT_MAX],
         }
     }
 }

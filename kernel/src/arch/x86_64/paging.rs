@@ -5,8 +5,8 @@ use x86_64::{
     PhysAddr, VirtAddr,
     registers::control::Cr3,
     structures::paging::{
-        FrameAllocator, Mapper, OffsetPageTable, Page, PageTable, PageTableFlags, PhysFrame,
-        Size4KiB,
+        FrameAllocator, FrameDeallocator, Mapper, OffsetPageTable, Page, PageTable, PageTableFlags,
+        PhysFrame, Size4KiB,
     },
 };
 
@@ -58,6 +58,11 @@ unsafe impl FrameAllocator<Size4KiB> for XunilFrameAllocator {
 
         None
     }
+}
+
+// TODO: make this work
+impl FrameDeallocator<Size4KiB> for XunilFrameAllocator {
+    unsafe fn deallocate_frame(&mut self, _frame: PhysFrame<Size4KiB>) {}
 }
 
 pub fn create_and_map_multiple_pages(
@@ -124,6 +129,12 @@ pub fn alloc_dma_frame() -> Option<(u64, *mut u8)> {
     let phys = frame.start_address().as_u64();
     let virt = phys + HHDM_OFFSET.load(Ordering::Relaxed);
     Some((phys, virt as *mut u8))
+}
+
+pub fn dealloc_dma_frame(phys: u64) {
+    let mut fa = FRAME_ALLOCATOR_X86_64.lock();
+
+    unsafe { fa.deallocate_frame(PhysFrame::containing_address(PhysAddr::new(phys))) };
 }
 
 pub static FRAME_ALLOCATOR_X86_64: Mutex<XunilFrameAllocator> =

@@ -5,7 +5,7 @@ pub struct AHCICap {
     pub np: u32,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub struct AHCIPortRegs {
     pub base: u64,
 }

@@ -1,10 +1,10 @@
-use alloc::sync::Arc;
+use alloc::{sync::Arc, vec::Vec};
 
 use crate::{
     driver::io::block::{
         BlockDevice, BlockError,
         ahci::{
-            fis::{FIS_TYPE_REG_H2D, FisRegH2d, HbaCmdTbl},
+            fis::{FIS_TYPE_REG_H2D, FisRegH2d, HBA_CMD_TBL_PRDT_MAX, HbaCmdTbl},
             regs::AHCIPortRegs,
         },
     },
@@ -18,11 +18,22 @@ pub fn alloc_dma_frame() -> Option<(u64, *mut u8)> {
     None
 }
 
+// TODO: make this work on aarch64
+#[cfg(target_arch = "aarch64")]
+pub fn dealloc_dma_frame() -> Option<(u64, *mut u8)> {
+    None
+}
+
 #[cfg(target_arch = "x86_64")]
-use crate::arch::x86_64::paging::alloc_dma_frame;
+use crate::arch::x86_64::paging::{alloc_dma_frame, dealloc_dma_frame};
 
 const ATA_CMD_IDENTIFY: u8 = 0xEC;
+const ATA_CMD_READ_DMA_EX: u8 = 0x25;
+const ATA_CMD_WRITE_DMA_EX: u8 = 0x35;
+
 const HBA_PX_IS_TFES: u32 = 1 << 30;
+const ATA_DEV_BUSY: u32 = 0x80;
+const ATA_DEV_DRQ: u32 = 0x08;
 
 #[repr(C)]
 #[derive(Debug, Default, Clone, Copy)]
@@ -109,6 +120,8 @@ impl SATACommandHeader {
         self.set(0xF, 16, v as u16)
     }
 }
+
+#[derive(Clone)]
 pub struct SATADevice {
     pub port: Arc<AHCIPortRegs>,
     pub clb_base_virt: u64,
@@ -252,16 +265,265 @@ impl SATADevice {
 }
 
 impl BlockDevice for SATADevice {
-    fn read_sectors(
-        &self,
-        _sector: u64,
-        _count: u32,
-        _buffer: &mut [u8],
-    ) -> Result<(), BlockError> {
-        unimplemented!()
+    fn read_sectors(&self, sector: u64, count: u32, buffer: &mut [u8]) -> Result<(), BlockError> {
+        let ss = self.sector_size as usize;
+        let total = count as usize * ss;
+        if buffer.len() < total {
+            println!(
+                "buffer is less than total needed len={} total={}",
+                buffer.len(),
+                total
+            );
+            return Err(BlockError::InvalidSector);
+        }
+
+        let frame_count = (total + 4095) / 4096;
+        let cmd_count = (frame_count + (HBA_CMD_TBL_PRDT_MAX - 1)) / HBA_CMD_TBL_PRDT_MAX;
+
+        let mut frames = Vec::with_capacity(frame_count);
+        for _ in 0..frame_count {
+            let (phys, virt) = alloc_dma_frame().ok_or(BlockError::SystemError)?;
+            frames.push((phys, virt));
+        }
+
+        for cmd_n in 0..cmd_count {
+            while self.port.ci() & 1 == 1 {} // wait until CI bit 0 clears
+
+            let slot = self.find_cmdslot();
+
+            if slot == 255 {
+                println!("Could not find slot for SATA command");
+                return Err(BlockError::IOTimeout);
+            }
+
+            let startl = sector as u32;
+            let starth = (sector >> 32) as u32;
+
+            let mut fis = FisRegH2d::default();
+
+            fis.fis_type = FIS_TYPE_REG_H2D;
+            fis.command = ATA_CMD_READ_DMA_EX;
+            fis.set_c(1);
+            fis.device = 1 << 6; // LBA mode
+
+            fis.lba0 = startl as u8;
+            fis.lba1 = (startl >> 8) as u8;
+            fis.lba2 = (startl >> 16) as u8;
+
+            fis.lba3 = starth as u8;
+            fis.lba4 = (starth >> 8) as u8;
+            fis.lba5 = (starth >> 16) as u8;
+
+            fis.countl = (count & 0xFF) as u8;
+            fis.counth = ((count >> 8) & 0xFF) as u8;
+
+            unsafe {
+                let mut cmd_header =
+                    *((self.clb_base_virt as *mut SATACommandHeader).add(slot as usize));
+                cmd_header.set_cfl((size_of::<FisRegH2d>() / size_of::<u32>()) as u8);
+                cmd_header.set_write(0);
+                cmd_header.prdtl = core::cmp::min(HBA_CMD_TBL_PRDT_MAX as u16, frame_count as u16);
+
+                *((self.clb_base_virt as *mut SATACommandHeader).add(slot as usize)) = cmd_header;
+
+                let cmdt = self.ctba_base_virt[slot as usize] as *mut HbaCmdTbl;
+                core::ptr::write(cmdt as *mut FisRegH2d, fis);
+
+                let command_prdtl_base = cmd_n
+                    * (core::cmp::min(HBA_CMD_TBL_PRDT_MAX as u16, frame_count as u16) as usize);
+
+                for i in command_prdtl_base..command_prdtl_base + (cmd_header.prdtl as usize) {
+                    let (buf_phys, _) = frames.get_unchecked(i);
+
+                    let prdt = &mut (*cmdt).prdt_entry[i - command_prdtl_base];
+                    prdt.dba = buf_phys.clone() as u32;
+                    prdt.dbau = (buf_phys.clone() >> 32) as u32;
+                    prdt.dbc = 4096 - 1;
+                }
+            }
+
+            if !wait_until(
+                || self.port.tfd() & (ATA_DEV_BUSY | ATA_DEV_DRQ) == 0,
+                100_000,
+            ) {
+                return Err(BlockError::IOTimeout);
+            }
+
+            self.port.set_ci(1 << slot);
+
+            let mut failed = false;
+
+            let done = wait_until(
+                || -> bool {
+                    if self.port.ci() & (1 << slot) == 0 {
+                        return true;
+                    }
+
+                    if self.port.is() & HBA_PX_IS_TFES != 0 {
+                        failed = true;
+                        return true;
+                    }
+
+                    return false;
+                },
+                100_000,
+            );
+
+            if failed {
+                println!("Task error returned for IDENTIFY ATA command");
+                return Err(BlockError::ReadError);
+            } else if !done {
+                println!("Device failed to respond to IDENTIFY ATA command in time");
+                return Err(BlockError::ReadError);
+            };
+
+            // check again
+            if self.port.is() & HBA_PX_IS_TFES != 0 {
+                println!("Task error returned for IDENTIFY ATA command");
+                return Err(BlockError::ReadError);
+            }
+        }
+
+        let mut copied = 0;
+
+        for (phys, virt) in frames {
+            let n = core::cmp::min(4096, total - copied);
+            unsafe {
+                core::ptr::copy_nonoverlapping(virt, buffer.as_mut_ptr().add(copied), n);
+            }
+            copied += n;
+
+            dealloc_dma_frame(phys); // do not the memory leak
+        }
+
+        return Ok(());
     }
-    fn write_sectors(&self, _sector: u64, _count: u32, _buffer: &[u8]) -> Result<(), BlockError> {
-        unimplemented!()
+
+    fn write_sectors(&self, sector: u64, count: u32, buffer: &[u8]) -> Result<(), BlockError> {
+        let ss = self.sector_size as usize;
+        let total = count as usize * ss;
+        if buffer.len() < total {
+            return Err(BlockError::InvalidSector);
+        }
+
+        let frame_count = (total + 4095) / 4096;
+        let cmd_count = (frame_count + (HBA_CMD_TBL_PRDT_MAX - 1)) / HBA_CMD_TBL_PRDT_MAX;
+
+        let mut frames = Vec::with_capacity(frame_count);
+        for _ in 0..frame_count {
+            let (phys, virt) = alloc_dma_frame().ok_or(BlockError::SystemError)?;
+            frames.push((phys, virt));
+        }
+
+        let mut copied = 0;
+
+        for n in 0..frame_count {
+            unsafe {
+                let frame = frames.get_unchecked_mut(n);
+                core::ptr::copy_nonoverlapping(buffer.as_ptr().add(copied), frame.1, 4096);
+            }
+            copied += 4096;
+        }
+
+        for cmd_n in 0..cmd_count {
+            while self.port.ci() & 1 == 1 {} // wait until CI bit 0 clears
+
+            let slot = self.find_cmdslot();
+
+            if slot == 255 {
+                println!("Could not find slot for SATA command");
+                return Err(BlockError::IOTimeout);
+            }
+
+            let startl = sector as u32;
+            let starth = (sector >> 32) as u32;
+
+            let mut fis = FisRegH2d::default();
+
+            fis.fis_type = FIS_TYPE_REG_H2D;
+            fis.command = ATA_CMD_WRITE_DMA_EX;
+            fis.set_c(1);
+            fis.device = 1 << 6; // LBA mode
+
+            fis.lba0 = startl as u8;
+            fis.lba1 = (startl >> 8) as u8;
+            fis.lba2 = (startl >> 16) as u8;
+
+            fis.lba3 = starth as u8;
+            fis.lba4 = (starth >> 8) as u8;
+            fis.lba5 = (starth >> 16) as u8;
+
+            fis.countl = (count & 0xFF) as u8;
+            fis.countl = ((count >> 8) & 0xFF) as u8;
+
+            unsafe {
+                let mut cmd_header =
+                    *((self.clb_base_virt as *mut SATACommandHeader).add(slot as usize));
+                cmd_header.set_cfl((size_of::<FisRegH2d>() / size_of::<u32>()) as u8);
+                cmd_header.set_write(1);
+                cmd_header.prdtl = core::cmp::min(HBA_CMD_TBL_PRDT_MAX as u16, frame_count as u16);
+
+                *((self.clb_base_virt as *mut SATACommandHeader).add(slot as usize)) = cmd_header;
+
+                let cmdt = self.ctba_base_virt[slot as usize] as *mut HbaCmdTbl;
+                core::ptr::write(cmdt as *mut FisRegH2d, fis);
+
+                let command_prdtl_base = cmd_n
+                    * (core::cmp::min(HBA_CMD_TBL_PRDT_MAX as u16, frame_count as u16) as usize);
+
+                for i in command_prdtl_base..command_prdtl_base + (cmd_header.prdtl as usize) {
+                    let (buf_phys, _) = frames.get_unchecked(i);
+
+                    let prdt = &mut (*cmdt).prdt_entry[i - command_prdtl_base];
+                    prdt.dba = buf_phys.clone() as u32;
+                    prdt.dbau = (buf_phys.clone() >> 32) as u32;
+                    prdt.dbc = 4096 - 1;
+                }
+            }
+
+            if !wait_until(
+                || self.port.tfd() & (ATA_DEV_BUSY | ATA_DEV_DRQ) == 0,
+                100_000,
+            ) {
+                return Err(BlockError::IOTimeout);
+            }
+
+            self.port.set_ci(1 << slot);
+
+            let mut failed = false;
+
+            let done = wait_until(
+                || -> bool {
+                    if self.port.ci() & (1 << slot) == 0 {
+                        return true;
+                    }
+
+                    if self.port.is() & HBA_PX_IS_TFES != 0 {
+                        failed = true;
+                        return true;
+                    }
+
+                    return false;
+                },
+                100_000,
+            );
+
+            if failed {
+                println!("Task error returned for IDENTIFY ATA command");
+                return Err(BlockError::ReadError);
+            } else if !done {
+                println!("Device failed to respond to IDENTIFY ATA command in time");
+                return Err(BlockError::ReadError);
+            };
+
+            // check again
+            if self.port.is() & HBA_PX_IS_TFES != 0 {
+                println!("Task error returned for IDENTIFY ATA command");
+                return Err(BlockError::ReadError);
+            }
+        }
+
+        return Ok(());
     }
     fn sector_size(&self) -> u32 {
         self.sector_size
