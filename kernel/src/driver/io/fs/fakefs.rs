@@ -28,7 +28,7 @@ impl FakeFileSystem {
 impl FileSystem for FakeFileSystem {
     fn read_file(&self, path: &str) -> Result<Vec<u8>, FSError> {
         for (filename, data) in &self.file_content {
-            if path.contains(filename) {
+            if path == *filename {
                 return Ok(data.to_vec());
             }
         }
@@ -43,7 +43,7 @@ impl FileSystem for FakeFileSystem {
     }
     fn exists(&self, path: &str) -> bool {
         for (filename, data) in &self.file_content {
-            if path.contains(filename) {
+            if path == *filename {
                 return true;
             }
         }
