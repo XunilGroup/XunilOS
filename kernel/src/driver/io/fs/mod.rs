@@ -36,6 +36,7 @@ pub struct Entry {
     pub size: u64,
 }
 
+#[derive(Debug)]
 pub enum FSError {
     NotFound,
     PermissionDenied,
