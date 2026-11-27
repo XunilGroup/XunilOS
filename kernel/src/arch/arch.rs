@@ -4,7 +4,7 @@ pub use crate::arch::x86_64::paging::FRAME_ALLOCATOR_X86_64 as FRAME_ALLOCATOR;
 #[cfg(target_arch = "x86_64")]
 use crate::arch::x86_64::{init::init_x86_64, usermode::enter_usermode_x86_64};
 #[cfg(target_arch = "aarch64")]
-use limine::response::ExecutableAddressResponse;
+use limine::request::ExecutableAddressResponse;
 use spin::mutex::Mutex;
 #[cfg(target_arch = "x86_64")]
 use x86_64::{
@@ -13,7 +13,7 @@ use x86_64::{
 };
 
 #[cfg(target_arch = "aarch64")]
-use aarch64_cpu::registers::{DAIF, Writeable};
+use aarch64_cpu::registers::{DAIF, Write};
 
 #[cfg(target_arch = "aarch64")]
 pub use crate::arch::aarch64::paging::FRAME_ALLOCATOR_AARCH64 as FRAME_ALLOCATOR;

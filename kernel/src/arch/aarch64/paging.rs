@@ -4,10 +4,7 @@ use crate::arch::{
     aarch64::init::KERNEL_STACK,
     arch::{HHDM_OFFSET, XunilFrameAllocator, safe_lock},
 };
-use limine::{
-    memory_map::EntryType,
-    response::{ExecutableAddressResponse, HhdmResponse, MemoryMapResponse},
-};
+use limine::{memmap::{MEMMAP_BAD_MEMORY, MEMMAP_FRAMEBUFFER, MEMMAP_RESERVED}, request::{ExecutableAddressResponse, HhdmRepsonse, MemmapResponse}};
 use spin::Mutex;
 
 pub static FRAME_ALLOCATOR_AARCH64: Mutex<XunilFrameAllocator> =
@@ -110,8 +107,8 @@ fn setup_tcr() {
 }
 
 pub fn initialize_paging_aarch64<'a>(
-    hhdm_response: &HhdmResponse,
-    memory_map_response: &'a MemoryMapResponse,
+    hhdm_response: &HhdmRepsonse,
+    memory_map_response: &'a MemmapResponse,
     executable_address_response: &ExecutableAddressResponse,
 ) -> AArchPageTable {
     let mut frame_allocator = FRAME_ALLOCATOR_AARCH64.lock();
@@ -152,18 +149,18 @@ pub fn initialize_paging_aarch64<'a>(
 
     // i need to map the entire memory range
     for entry in memory_map_response.entries() {
-        if entry.entry_type == EntryType::BAD_MEMORY || entry.entry_type == EntryType::RESERVED {
+        if entry.type_ == MEMMAP_BAD_MEMORY || entry.type_ == MEMMAP_RESERVED {
             continue;
         }
 
-        let flags = if entry.entry_type == EntryType::FRAMEBUFFER {
+        let flags = if entry.type_ == MEMMAP_FRAMEBUFFER {
             device_flags()
         } else {
             kernel_data_flags()
         };
 
         page_table.map_range(
-            entry.base + hhdm_response.offset(),
+            entry.base + hhdm_response.offset,
             entry.base,
             entry.length,
             flags,

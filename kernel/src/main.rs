@@ -23,7 +23,7 @@ use crate::arch::arch::KERNEL_MAPPER;
 use crate::driver::io::input::init_input;
 
 #[cfg(target_arch = "aarch64")]
-use aarch64_cpu::registers::{DAIF, Writeable};
+use aarch64_cpu::registers::{DAIF, Write as Aarch64Write};
 
 #[cfg(target_arch = "x86_64")]
 use crate::driver::io::ps2::init_keyboard;
@@ -168,14 +168,15 @@ pub unsafe extern "C" fn kernel_main_aarch64(mapper: &mut AArchPageTable) -> ! {
     init(mapper);
 
     if let Some(framebuffer_response) = FRAMEBUFFER_REQUEST.response() {
-        if let Some(limine_framebuffer) = framebuffer_response.framebuffers().next() {
-            init_framebuffer(&limine_framebuffer);
+        if let Some(framebuffers) = framebuffer_response.framebuffers_rev1() {
+            if framebuffers.len() == 0 {
+                serial_print("no framebuffers found");
+                kernel_crash()
+            }
+
+            init_framebuffer(&framebuffers[0]);
             with_framebuffer(|fb| fb.setup_aarch64());
-        } else {
-            panic!("no framebuffers found");
         }
-    } else {
-        panic!("no framebuffers found");
     }
 
     init_input();

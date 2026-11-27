@@ -1,4 +1,4 @@
-use crate::{arch::arch::safe_lock, println};
+use crate::arch::arch::safe_lock;
 use limine::framebuffer::FramebufferRev1 as LimineFramebuffer;
 use spin::Mutex;
 

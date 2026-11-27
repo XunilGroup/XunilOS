@@ -202,7 +202,7 @@ impl Locked<Scheduler> {
 
                     #[cfg(target_arch = "aarch64")]
                     unsafe {
-                        use aarch64_cpu::registers::{DAIF, Writeable};
+                        use aarch64_cpu::registers::{DAIF, Write};
                         DAIF.write(
                             DAIF::D::Masked + DAIF::A::Masked + DAIF::I::Unmasked + DAIF::F::Masked,
                         );

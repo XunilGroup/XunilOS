@@ -13,7 +13,7 @@ use crate::{
     },
     mm::shm::init_shm,
 };
-use limine::response::{ExecutableAddressResponse, HhdmResponse, MemoryMapResponse};
+use limine::request::{ExecutableAddressResponse, HhdmRepsonse, MemmapResponse};
 
 // needs to be page aligned since we map it into the page table
 #[repr(align(4096))]
@@ -47,8 +47,8 @@ pub extern "C" fn init_aarch64(mapper: &mut AArchPageTable) {
 }
 
 pub fn preinit_aarch64<'a>(
-    hhdm_response: &HhdmResponse,
-    memory_map_response: &'a MemoryMapResponse,
+    hhdm_response: &HhdmRepsonse,
+    memory_map_response: &'a MemmapResponse,
     executable_address_response: &ExecutableAddressResponse,
 ) {
     let mapper: AArchPageTable = initialize_paging_aarch64(
