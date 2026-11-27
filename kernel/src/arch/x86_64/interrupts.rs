@@ -3,7 +3,7 @@ use core::arch::naked_asm;
 use crate::{
     arch::{
         arch::do_interrupt,
-        x86_64::gdt,
+        x86_64::{gdt, kmi::LAPIC_BASE},
     },
     driver::io::ps2::{keyboard_interrupt, mouse_interrupt, push_scancode},
     println,
@@ -60,6 +60,7 @@ lazy_static! {
         idt.general_protection_fault.set_handler_fn(gpf_handler);
         idt[InterruptIndex::Keyboard.as_u8()].set_handler_fn(keyboard_interrupt_handler);
         idt[InterruptIndex::Mouse.as_u8()].set_handler_fn(mouse_interrupt_handler);
+        idt[0xFF].set_handler_fn(do_nothing);
         idt.invalid_opcode.set_handler_fn(invalid_opcode_handler);
         idt
     };
@@ -68,6 +69,8 @@ lazy_static! {
 pub fn init_idt_x86_64() {
     IDT.load();
 }
+
+pub extern "x86-interrupt" fn do_nothing(_stack_frame: InterruptStackFrame) {}
 
 pub extern "x86-interrupt" fn breakpoint_handler(stack_frame: InterruptStackFrame) {
     println!("EXCEPTION: BREAKPOINT\n{:#?}", stack_frame);
@@ -220,8 +223,7 @@ extern "C" fn x86_interrupt(ctx: *mut UserContext) -> isize {
 #[unsafe(no_mangle)]
 extern "C" fn eoi() {
     unsafe {
-        PICS.lock()
-            .notify_end_of_interrupt(InterruptIndex::Timer.as_u8());
+        core::ptr::write_volatile((LAPIC_BASE as *mut u32).add(0xB0 / 4), 0);
     }
 }
 
@@ -229,8 +231,7 @@ extern "x86-interrupt" fn mouse_interrupt_handler(_stack_frame: InterruptStackFr
     mouse_interrupt();
 
     unsafe {
-        PICS.lock()
-            .notify_end_of_interrupt(InterruptIndex::Mouse.as_u8());
+        core::ptr::write_volatile((LAPIC_BASE as *mut u32).add(0xB0 / 4), 0);
     }
 }
 
@@ -240,7 +241,6 @@ pub extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: Interrupt
     }
 
     unsafe {
-        PICS.lock()
-            .notify_end_of_interrupt(InterruptIndex::Keyboard.as_u8());
+        core::ptr::write_volatile((LAPIC_BASE as *mut u32).add(0xB0 / 4), 0);
     }
 }

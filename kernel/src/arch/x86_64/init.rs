@@ -3,7 +3,7 @@ use crate::{
         gdt::load_gdt_x86_64,
         heap::init_heap,
         interrupts::{PICS, init_idt_x86_64},
-        kmi::setup_kmi,
+        kmi::{LAPIC_BASE, setup_kmi},
         paging::{FRAME_ALLOCATOR_X86_64, MMIO_VIRT_BASE, initialize_paging_x86_64, map_mmio},
         syscall::init_syscalls,
     },
@@ -90,9 +90,6 @@ pub fn init_x86_64<'a>(
     unsafe {
         let mut pics = PICS.lock();
         pics.initialize();
-        let master_mask = 0xF8; // unmask cascade to slave
-        let slave_mask = 0xEF; // unmask mouse interrupt (clear bit 4)
-        pics.write_masks(master_mask, slave_mask);
     }
 
     setup_kmi();
@@ -104,6 +101,39 @@ pub fn init_x86_64<'a>(
     init_heap(&mut mapper)
         .ok()
         .expect("Failed to initalize heap");
+
+    unsafe {
+        use x86_64::registers::model_specific::Msr;
+        let mut apic_base = Msr::new(0x1B); // IA32_APIC_BASE
+        let val = apic_base.read();
+        apic_base.write(val | (1 << 11)); // enable APIC with bit 11
+
+        let apic_phys = val & 0x000F_FFFF_FFFF_F000;
+        map_mmio(apic_phys, &mut mapper, 0x1000);
+        let apic = (MMIO_VIRT_BASE + apic_phys) as *mut u32;
+
+        core::ptr::write_volatile(apic.add(0xF0 / 4), 0x1FF); // enable SVR
+        core::ptr::write_volatile(apic.add(0x80 / 4), 0); // enable TPR
+        core::ptr::write_volatile(apic.add(0x350 / 4), 0x10700); // mask LINT0
+
+        map_mmio(0xFEC0_0000, &mut mapper, 0x1000);
+        let io = (MMIO_VIRT_BASE + 0xFEC0_0000) as *mut u32;
+
+        let route = |pin: u32, vector: u32| {
+            core::ptr::write_volatile(io, 0x11 + pin * 2);
+            core::ptr::write_volatile(io.add(4), 0);
+            core::ptr::write_volatile(io, 0x10 + pin * 2);
+            core::ptr::write_volatile(io.add(4), vector);
+        };
+
+        route(2, 32); // PIT
+        route(1, 33); // keyboard
+        route(12, 44); // mouse
+
+        LAPIC_BASE = MMIO_VIRT_BASE + apic_phys;
+
+        PICS.lock().write_masks(0xFF, 0xFF);
+    }
 
     interrupts::enable();
 

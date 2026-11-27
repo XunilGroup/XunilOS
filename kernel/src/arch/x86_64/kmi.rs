@@ -1,6 +1,8 @@
 use crate::arch::arch::safe_lock;
 use x86_64::instructions::port::Port;
 
+pub static mut LAPIC_BASE: u64 = 0;
+
 fn wait_input_buffer_clear(command_port: &mut Port<u8>) {
     unsafe {
         loop {
