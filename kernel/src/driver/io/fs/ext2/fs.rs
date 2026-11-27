@@ -1,13 +1,16 @@
-use crate::driver::io::{
-    block::BlockDevice,
-    fs::{
-        FSError, FileSystem,
-        ext2::{
-            BlockGroupDescriptor, Ext2Inode, Ext2InodeType, Ext2Superblock,
-            read_raw_bytes_from_disk, read_u8_from_offset, read_u16_from_offset,
-            read_u32_from_offset,
+use crate::{
+    driver::io::{
+        block::BlockDevice,
+        fs::{
+            FSError, FileSystem,
+            ext2::{
+                BlockGroupDescriptor, Ext2Inode, Ext2InodeType, Ext2Superblock,
+                read_raw_bytes_from_disk, read_u8_from_offset, read_u16_from_offset,
+                read_u32_from_offset,
+            },
         },
     },
+    println,
 };
 use alloc::{
     string::{String, ToString},
@@ -16,7 +19,7 @@ use alloc::{
 };
 use core::f64::math::ceil;
 
-struct Ext2FileSystem {
+pub struct Ext2FileSystem {
     superblock: Ext2Superblock,
     block_offset: u64,
     block_group_count: u64,
@@ -49,11 +52,17 @@ impl Ext2FileSystem {
             ceil((superblock.s_blocks_count as f64) / (superblock.s_blocks_per_group as f64))
                 as u64;
 
+        let inode_size = if superblock.s_rev_level == 0 || superblock.s_inode_size == 0 {
+            128
+        } else {
+            superblock.s_inode_size as u32
+        };
+
         Ok(Ext2FileSystem {
             superblock,
             block_size,
             block_group_count,
-            inode_size: 128,
+            inode_size,
             block_offset,
             device: block_device.clone(),
         })
@@ -112,13 +121,13 @@ impl Ext2FileSystem {
     }
 
     fn traverse_filesystem_tree(&self, path: &str) -> Result<Ext2Inode, FSError> {
-        let path_parts: Vec<&str> = path
+        let mut path_parts: Vec<&str> = path
             .split("/")
             .filter(|s| !s.is_empty())
             .collect::<Vec<&str>>();
 
         if path_parts.is_empty() {
-            return Err(FSError::InvalidPath);
+            return self.get_inode(2).ok_or(FSError::IOError);
         }
 
         let mut inode;
@@ -129,70 +138,61 @@ impl Ext2FileSystem {
                 None => return Err(FSError::IOError),
             };
 
-            if path_n != path_parts.len() - 1 {
-                match inode.inode_type().unwrap_or(Ext2InodeType::CharDevice) {
-                    Ext2InodeType::Directory => {
-                        let mut dir_found = false;
-                        for &block in &inode.i_block[..12] {
-                            if block == 0 {
-                                break;
-                            }
+            match inode.inode_type().unwrap_or(Ext2InodeType::CharDevice) {
+                Ext2InodeType::Directory => {
+                    let mut dir_found = false;
+                    for &block in &inode.i_block[..12] {
+                        if block == 0 {
+                            break;
+                        }
 
-                            let block_data = match self.get_block(block) {
-                                Some(block_data) => block_data,
-                                None => return Err(FSError::IOError),
-                            };
+                        let block_data = match self.get_block(block) {
+                            Some(block_data) => block_data,
+                            None => return Err(FSError::IOError),
+                        };
 
-                            let mut offset = 0;
+                        let mut offset = 0;
 
-                            while offset < block_data.len() {
-                                let entry_start = offset;
+                        while offset < block_data.len() {
+                            let entry_start = offset;
 
-                                let inode =
-                                    read_u32_from_offset(block_data.as_slice(), &mut offset);
-                                let rec_len =
-                                    read_u16_from_offset(block_data.as_slice(), &mut offset);
-                                let name_len =
-                                    read_u8_from_offset(block_data.as_slice(), &mut offset);
-                                let file_type =
-                                    read_u8_from_offset(block_data.as_slice(), &mut offset);
+                            let inode = read_u32_from_offset(block_data.as_slice(), &mut offset);
+                            let rec_len = read_u16_from_offset(block_data.as_slice(), &mut offset);
+                            let name_len = read_u8_from_offset(block_data.as_slice(), &mut offset);
+                            let file_type = read_u8_from_offset(block_data.as_slice(), &mut offset);
 
-                                if inode != 0 {
-                                    let name_bytes =
-                                        &block_data[offset..offset + name_len as usize];
-                                    let name = core::str::from_utf8(name_bytes).unwrap_or("");
+                            if inode != 0 {
+                                let name_bytes = &block_data[offset..offset + name_len as usize];
+                                let name = core::str::from_utf8(name_bytes).unwrap_or("");
 
-                                    if name == path_parts[path_n] {
-                                        inode_n = inode as u64;
-                                        dir_found = true;
-                                        break;
-                                    }
-                                }
-
-                                if rec_len == 0 {
+                                if name == path_parts[path_n] {
+                                    inode_n = inode as u64;
+                                    dir_found = true;
                                     break;
                                 }
-
-                                offset = entry_start + rec_len as usize;
                             }
 
-                            if dir_found {
+                            if rec_len == 0 {
                                 break;
                             }
+
+                            offset = entry_start + rec_len as usize;
                         }
 
-                        if !dir_found {
-                            return Err(FSError::NotFound);
+                        if dir_found {
+                            break;
                         }
                     }
-                    _ => return Err(FSError::InvalidPath),
-                };
-            } else {
-                return Ok(inode);
-            }
+
+                    if !dir_found {
+                        return Err(FSError::NotFound);
+                    }
+                }
+                _ => return Err(FSError::InvalidPath),
+            };
         }
 
-        return Err(FSError::NotFound);
+        return self.get_inode(inode_n).ok_or(FSError::IOError);
     }
 }
 

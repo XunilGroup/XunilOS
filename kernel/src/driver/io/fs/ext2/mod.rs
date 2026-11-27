@@ -2,6 +2,7 @@ use core::f64::math::ceil;
 use core::slice;
 
 use crate::driver::io::{block::BlockDevice, fs::FSError};
+use crate::println;
 use alloc::vec;
 use alloc::{sync::Arc, vec::Vec};
 
@@ -40,19 +41,25 @@ pub fn read_raw_bytes_from_disk(
     offset: u64,
     size: u32,
 ) -> Option<Vec<u8>> {
-    let mut buffer_vec = vec![0u8; size as usize];
-    let mut buffer_slice = buffer_vec.as_mut_slice();
+    let sector_size = device.sector_size() as u64;
+    let sector = offset / sector_size;
+    let start = (offset % sector_size) as usize;
+    let total = start + size as usize;
+    let count = total.div_ceil(sector_size as usize) as u32;
 
-    let sector = offset / (device.sector_size() as u64);
-    let count = (ceil(size as f64 / device.sector_size() as f64)) as u32;
+    let mut buffer_vec = vec![0u8; count as usize * sector_size as usize];
 
-    match device.read_sectors(sector, count, buffer_slice) {
-        Err(_) => return None,
-        _ => Some(buffer_vec),
+    match device.read_sectors(sector, count, buffer_vec.as_mut_slice()) {
+        Err(error) => {
+            println!("read_sectors failed: {:?}", error);
+            None
+        }
+        _ => Some(buffer_vec[start..start + size as usize].to_vec()),
     }
 }
 
 #[repr(C)]
+#[derive(Debug)]
 struct Ext2Inode {
     i_mode: u16,
     i_uid: u16,
@@ -112,9 +119,7 @@ impl Ext2Inode {
     }
 
     fn inode_type(&self) -> Option<Ext2InodeType> {
-        let inode_mode = self.i_mode;
-        let mask = (inode_mode >> 12) & 0xF;
-        match mask {
+        match self.i_mode & 0xF000 {
             0x1000 => Some(Ext2InodeType::FIFO),
             0x2000 => Some(Ext2InodeType::CharDevice),
             0x4000 => Some(Ext2InodeType::Directory),
@@ -186,6 +191,8 @@ struct Ext2Superblock {
     s_rev_level: u32,
     s_def_resuid: u16,
     s_def_resgid: u16,
+    s_first_ino: u32,
+    s_inode_size: u16,
 }
 
 impl Ext2Superblock {
@@ -217,6 +224,8 @@ impl Ext2Superblock {
             s_rev_level: read_u32_from_offset(byte_array, &mut off),
             s_def_resuid: read_u16_from_offset(byte_array, &mut off),
             s_def_resgid: read_u16_from_offset(byte_array, &mut off),
+            s_first_ino: read_u32_from_offset(byte_array, &mut off),
+            s_inode_size: read_u16_from_offset(byte_array, &mut off),
         }
     }
 }
