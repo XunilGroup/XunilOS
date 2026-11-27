@@ -9,12 +9,25 @@ use crate::{
     },
     config::TIMER_FREQUENCY_HZ,
     driver::{
-        io::{block::ahci::discover_ahci, fs::vfs::init_vfs, pci::discover_devices},
+        io::{
+            block::{
+                ahci::{device::SATADevice, discover_ahci},
+                gpt::find_gpt,
+            },
+            fs::{
+                FileSystem,
+                ext2::fs::Ext2FileSystem,
+                vfs::{VFS_INSTANCE, init_vfs},
+            },
+            pci::discover_devices,
+        },
         ipc::init_ipc,
     },
     mm::shm::init_shm,
+    println,
 };
 
+use alloc::{sync::Arc, vec::Vec};
 use x86_64::{
     VirtAddr,
     instructions::{interrupts, interrupts::without_interrupts, port::Port},
@@ -98,10 +111,60 @@ pub fn init_x86_64<'a>(
     init_shm();
     init_vfs();
 
-    #[cfg(target_arch = "x86_64")]
-    {
-        let pci_devices = discover_devices();
-        discover_ahci(pci_devices, &mut mapper);
+    let pci_devices = discover_devices();
+    let controllers = discover_ahci(pci_devices, &mut mapper);
+    let mut sata_devices = Vec::<SATADevice>::new();
+
+    for controller in controllers {
+        for sata_device_opt in controller.sata_devices {
+            if let Some(sata_device) = sata_device_opt {
+                println!(
+                    "SATA Device: sector_size={} capacity={}",
+                    sata_device.sector_size, sata_device.capacity_sectors
+                );
+                if let Some(partition_table) = find_gpt(&sata_device) {
+                    println!(
+                        "GPT Partition Table: rev={}, guid={} partition_count={}",
+                        partition_table.revision,
+                        partition_table.guid,
+                        partition_table.partitions.len()
+                    );
+                    for partition in partition_table.partitions {
+                        println!(
+                            "Partition: name={} start={}, end={} type_guid={} unique_guid={}",
+                            partition.name,
+                            partition.start,
+                            partition.end,
+                            partition.partition_type_guid,
+                            partition.unique_partition_guid
+                        );
+                        if let Ok(filesystem) = Ext2FileSystem::new(
+                            partition.start * (sata_device.sector_size as u64),
+                            Arc::new(sata_device.clone()),
+                        ) {
+                            println!("Ext2 Filesystem found");
+                            match filesystem.list_directory("/") {
+                                Ok(contents) => {
+                                    println!("Contents of /: {:?}", contents)
+                                }
+                                Err(err) => {
+                                    println!("Could not get contents of /: {:?}", err)
+                                }
+                            }
+                            #[allow(static_mut_refs)]
+                            unsafe {
+                                VFS_INSTANCE
+                                    .as_mut()
+                                    .unwrap()
+                                    .add_filesystem(Arc::new(filesystem));
+                            }
+                        }
+                    }
+                }
+
+                sata_devices.push(sata_device);
+            }
+        }
     }
 
     return mapper;
