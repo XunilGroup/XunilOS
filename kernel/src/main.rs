@@ -10,10 +10,9 @@ use core::fmt::{self, Write};
 use core::sync::atomic::{AtomicU64, Ordering};
 
 use limine::{
-    BaseRevision,
+    BaseRevision, RequestsEndMarker, RequestsStartMarker,
     request::{
-        DateAtBootRequest, ExecutableAddressRequest, FramebufferRequest, HhdmRequest,
-        MemoryMapRequest, RequestsEndMarker, RequestsStartMarker,
+        DateAtBootRequest, ExecutableAddressRequest, FramebufferRequest, HhdmRequest, MemmapRequest,
     },
 };
 
@@ -34,7 +33,6 @@ use crate::driver::{
     elf::loader::run_elf,
     framebuffer::{init_framebuffer, with_framebuffer},
     io::fs::assets::INIT_ELF,
-    // serial::{ConsoleWriter, init_serial_console, with_serial_console},
     timer::TIMER,
 };
 
@@ -63,7 +61,7 @@ static HHDM_REQUEST: HhdmRequest = HhdmRequest::new();
 
 #[used]
 #[unsafe(link_section = ".requests")]
-static MEMORY_MAP_REQUEST: MemoryMapRequest = MemoryMapRequest::new();
+static MEMORY_MAP_REQUEST: MemmapRequest = MemmapRequest::new();
 
 #[used]
 #[unsafe(link_section = ".requests")]
@@ -124,23 +122,15 @@ unsafe extern "C" fn kmain() -> ! {
         DAIF.write(DAIF::D::Masked + DAIF::A::Masked + DAIF::I::Masked + DAIF::F::Masked);
     }
 
-    if let Some(hhdm_response) = HHDM_REQUEST.get_response() {
-        HHDM_OFFSET.store(
-            hhdm_response.offset(),
-            core::sync::atomic::Ordering::Relaxed,
-        );
+    if let Some(hhdm_response) = HHDM_REQUEST.response() {
+        HHDM_OFFSET.store(hhdm_response.offset, core::sync::atomic::Ordering::Relaxed);
         #[allow(unused_variables)]
-        if let Some(memory_map_response) = MEMORY_MAP_REQUEST.get_response() {
-            if let Some(executable_address_response) = EXECUTABLE_ADDRESS_REQUEST.get_response() {
-                KERNEL_PHYS_BASE.store(
-                    executable_address_response.physical_base(),
-                    Ordering::Relaxed,
-                );
+        if let Some(memory_map_response) = MEMORY_MAP_REQUEST.response() {
+            if let Some(executable_address_response) = EXECUTABLE_ADDRESS_REQUEST.response() {
+                KERNEL_PHYS_BASE
+                    .store(executable_address_response.physical_base, Ordering::Relaxed);
 
-                KERNEL_VIRT_BASE.store(
-                    executable_address_response.virtual_base(),
-                    Ordering::Relaxed,
-                );
+                KERNEL_VIRT_BASE.store(executable_address_response.virtual_base, Ordering::Relaxed);
 
                 #[cfg(target_arch = "aarch64")]
                 use crate::arch::aarch64::init::preinit_aarch64;
@@ -177,7 +167,7 @@ pub unsafe extern "C" fn kernel_main_aarch64(mapper: &mut AArchPageTable) -> ! {
     assert!(BASE_REVISION.is_supported());
     init(mapper);
 
-    if let Some(framebuffer_response) = FRAMEBUFFER_REQUEST.get_response() {
+    if let Some(framebuffer_response) = FRAMEBUFFER_REQUEST.response() {
         if let Some(limine_framebuffer) = framebuffer_response.framebuffers().next() {
             init_framebuffer(&limine_framebuffer);
             with_framebuffer(|fb| fb.setup_aarch64());
@@ -190,8 +180,8 @@ pub unsafe extern "C" fn kernel_main_aarch64(mapper: &mut AArchPageTable) -> ! {
 
     init_input();
 
-    if let Some(date_at_boot_response) = DATE_AT_BOOT_REQUEST.get_response() {
-        TIMER.set_date_at_boot(date_at_boot_response.timestamp().as_secs());
+    if let Some(date_at_boot_response) = DATE_AT_BOOT_REQUEST.response() {
+        TIMER.set_date_at_boot(date_at_boot_response.timestamp as u64);
     } else {
         println!("Could not get date at boot. Will default to 0.")
     }
@@ -211,8 +201,8 @@ pub unsafe fn kernel_main_x86_64() -> ! {
     assert!(BASE_REVISION.is_supported());
 
     let (hhdm_response, memory_map_response) = {
-        if let Some(a) = HHDM_REQUEST.get_response() {
-            if let Some(b) = MEMORY_MAP_REQUEST.get_response() {
+        if let Some(a) = HHDM_REQUEST.response() {
+            if let Some(b) = MEMORY_MAP_REQUEST.response() {
                 (a, b)
             } else {
                 kernel_crash(); // Could not get required info from Limine's memory map.
@@ -224,12 +214,17 @@ pub unsafe fn kernel_main_x86_64() -> ! {
 
     let mut mapper = init(hhdm_response, memory_map_response);
 
-    if let Some(framebuffer_response) = FRAMEBUFFER_REQUEST.get_response() {
-        if let Some(limine_framebuffer) = framebuffer_response.framebuffers().next() {
-            init_framebuffer(&limine_framebuffer);
+    if let Some(framebuffer_response) = FRAMEBUFFER_REQUEST.response() {
+        if let Some(framebuffers) = framebuffer_response.framebuffers_rev1() {
+            if framebuffers.len() == 0 {
+                serial_print("no framebuffers found");
+                kernel_crash()
+            }
+
+            println!("{}", framebuffers.len());
+
+            init_framebuffer(&framebuffers[0]);
             with_framebuffer(|fb| fb.setup_x86_64(&mut mapper));
-        } else {
-            serial_print("no framebuffers found");
         }
     }
 
@@ -241,8 +236,8 @@ pub unsafe fn kernel_main_x86_64() -> ! {
         *KERNEL_MAPPER.get_mut() = Some(mapper)
     };
 
-    if let Some(date_at_boot_response) = DATE_AT_BOOT_REQUEST.get_response() {
-        TIMER.set_date_at_boot(date_at_boot_response.timestamp().as_secs());
+    if let Some(date_at_boot_response) = DATE_AT_BOOT_REQUEST.response() {
+        TIMER.set_date_at_boot(date_at_boot_response.timestamp as u64);
     } else {
         println!("Could not get date at boot. Will default to 0.")
     }

@@ -1,6 +1,6 @@
 use core::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use heapless::spsc::{Consumer, Producer, Queue};
-use pc_keyboard::{HandleControl, KeyCode, KeyState, Keyboard, ScancodeSet2, layouts};
+use pc_keyboard::{HandleControl, KeyCode, KeyState, PS2Keyboard, ScancodeSet2, layouts};
 
 use static_cell::StaticCell;
 
@@ -107,7 +107,7 @@ pub fn keycode_to_linux(kc: KeyCode) -> Option<u8> {
 static SCANCODE_QUEUE: StaticCell<Queue<u8, 256>> = StaticCell::new();
 static mut SCANCODE_PROD: Option<Producer<'static, u8>> = None;
 static mut SCANCODE_CONS: Option<Consumer<'static, u8>> = None;
-static mut KEYBOARD: Option<Keyboard<layouts::Us104Key, ScancodeSet2>> = None;
+static mut KEYBOARD: Option<PS2Keyboard<layouts::Us104Key, ScancodeSet2>> = None;
 
 static MOUSE_LEFT_BUTTON: AtomicBool = AtomicBool::new(false);
 static MOUSE_RIGHT_BUTTON: AtomicBool = AtomicBool::new(false);
@@ -120,7 +120,7 @@ pub fn init_keyboard() {
     unsafe {
         SCANCODE_PROD = Some(p);
         SCANCODE_CONS = Some(c);
-        KEYBOARD = Some(Keyboard::new(
+        KEYBOARD = Some(PS2Keyboard::new(
             ScancodeSet2::new(),
             layouts::Us104Key,
             HandleControl::Ignore,

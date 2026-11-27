@@ -31,8 +31,8 @@ use core::{
     sync::atomic::{AtomicU64, Ordering},
 };
 use limine::{
-    memory_map::{Entry, EntryType},
-    response::{HhdmResponse, MemoryMapResponse},
+    memmap::{Entry, MEMMAP_USABLE},
+    request::{HhdmRepsonse, MemmapResponse},
 };
 
 #[cfg(target_arch = "aarch64")]
@@ -82,7 +82,7 @@ impl XunilFrameAllocator {
         let mut count = 0usize;
 
         for region in memory_map.iter().copied() {
-            if region.entry_type != EntryType::USABLE {
+            if region.type_ != MEMMAP_USABLE {
                 continue;
             }
 
@@ -110,8 +110,8 @@ impl XunilFrameAllocator {
 
 #[cfg(target_arch = "x86_64")]
 pub fn init<'a>(
-    hhdm_response: &HhdmResponse,
-    memory_map_response: &'a MemoryMapResponse,
+    hhdm_response: &HhdmRepsonse,
+    memory_map_response: &'a MemmapResponse,
 ) -> OffsetPageTable<'a> {
     init_x86_64(hhdm_response, memory_map_response)
 }

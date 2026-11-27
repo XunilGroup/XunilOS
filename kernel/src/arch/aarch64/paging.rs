@@ -126,8 +126,8 @@ pub fn initialize_paging_aarch64<'a>(
         static __kernel_end: u8;
     }
 
-    let k_phys_base = executable_address_response.physical_base();
-    let k_virt_base = executable_address_response.virtual_base();
+    let k_phys_base = executable_address_response.physical_base;
+    let k_virt_base = executable_address_response.virtual_base;
 
     let text_end = unsafe { &__text_end as *const u8 as u64 };
     let k_start_virt = unsafe { (&__kernel_start as *const u8) as u64 };

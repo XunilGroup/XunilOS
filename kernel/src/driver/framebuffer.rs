@@ -1,5 +1,5 @@
-use crate::arch::arch::safe_lock;
-use limine::framebuffer::Framebuffer as LimineFramebuffer;
+use crate::{arch::arch::safe_lock, println};
+use limine::framebuffer::FramebufferRev1 as LimineFramebuffer;
 use spin::Mutex;
 
 #[cfg(target_arch = "x86_64")]
@@ -32,11 +32,12 @@ pub struct FramebufferMeta {
 
 impl Framebuffer {
     pub fn new(limine_fb: &LimineFramebuffer) -> Framebuffer {
-        let width = limine_fb.width() as usize;
-        let height = limine_fb.height() as usize;
-        let pitch = limine_fb.pitch() as usize / 4;
+        let width = limine_fb.width as usize;
+        let height = limine_fb.height as usize;
+        let pitch = limine_fb.pitch as usize / 4;
+        println!("{} {} {}", width, height, pitch);
         Framebuffer {
-            addr: limine_fb.addr().cast::<u32>(),
+            addr: limine_fb.address().cast::<u32>(),
             width,
             height,
             pitch,

@@ -4,7 +4,7 @@ use crate::{
         heap::init_heap,
         interrupts::{PICS, init_idt_x86_64},
         kmi::setup_kmi,
-        paging::{FRAME_ALLOCATOR_X86_64, initialize_paging_x86_64},
+        paging::{FRAME_ALLOCATOR_X86_64, MMIO_VIRT_BASE, initialize_paging_x86_64, map_mmio},
         syscall::init_syscalls,
     },
     config::TIMER_FREQUENCY_HZ,
@@ -35,15 +35,15 @@ use x86_64::{
     structures::paging::OffsetPageTable,
 };
 
-use limine::response::{HhdmResponse, MemoryMapResponse};
+use limine::request::{HhdmRepsonse, MemmapResponse};
 
 const PIT_DIVISOR: u16 = (1_193_182_u32 / TIMER_FREQUENCY_HZ as u32) as u16;
 
 pub fn memory_management_init(
-    hhdm_response: &HhdmResponse,
-    memory_map_response: &MemoryMapResponse,
+    hhdm_response: &HhdmRepsonse,
+    memory_map_response: &MemmapResponse,
 ) -> OffsetPageTable<'static> {
-    let physical_offset = VirtAddr::new(hhdm_response.offset());
+    let physical_offset = VirtAddr::new(hhdm_response.offset);
     let mapper = unsafe { initialize_paging_x86_64(physical_offset) };
     let mut frame_allocator = FRAME_ALLOCATOR_X86_64.lock();
     frame_allocator.initialize(memory_map_response.entries());
@@ -65,8 +65,8 @@ pub fn set_pit_interval() {
 }
 
 pub fn init_x86_64<'a>(
-    hhdm_response: &HhdmResponse,
-    memory_map_response: &'a MemoryMapResponse,
+    hhdm_response: &HhdmRepsonse,
+    memory_map_response: &'a MemmapResponse,
 ) -> OffsetPageTable<'a> {
     load_gdt_x86_64();
 
