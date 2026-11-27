@@ -20,7 +20,7 @@ pub fn alloc_dma_frame() -> Option<(u64, *mut u8)> {
 
 // TODO: make this work on aarch64
 #[cfg(target_arch = "aarch64")]
-pub fn dealloc_dma_frame() -> Option<(u64, *mut u8)> {
+pub fn dealloc_dma_frame(phys: u64) {
     None
 }
 
