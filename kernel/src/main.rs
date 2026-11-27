@@ -221,8 +221,6 @@ pub unsafe fn kernel_main_x86_64() -> ! {
                 kernel_crash()
             }
 
-            println!("{}", framebuffers.len());
-
             init_framebuffer(&framebuffers[0]);
             with_framebuffer(|fb| fb.setup_x86_64(&mut mapper));
         }

@@ -23,8 +23,6 @@ pub fn discover_ahci(pci_devices: Vec<PCIDevice>, mapper: &mut PageTable) -> Vec
         if device.class == 0x01 && device.subclass == 0x06 {
             // SATA/AHCI devices
             if [0x01, 0x85, 0x00].contains(&device.prog_if) {
-                println!("{:?}", device);
-
                 if let Some(abar) = device.bars[5] {
                     #[cfg(target_arch = "x86_64")]
                     let mmio_virt_base = MMIO_VIRT_BASE;

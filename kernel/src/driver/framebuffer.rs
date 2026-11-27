@@ -35,7 +35,6 @@ impl Framebuffer {
         let width = limine_fb.width as usize;
         let height = limine_fb.height as usize;
         let pitch = limine_fb.pitch as usize / 4;
-        println!("{} {} {}", width, height, pitch);
         Framebuffer {
             addr: limine_fb.address().cast::<u32>(),
             width,
